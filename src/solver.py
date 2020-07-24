@@ -8,10 +8,11 @@ import torch
 
 from pit_criterion import cal_loss
 
+from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
     def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=10, half_lr=True,
-                early_stop=True, max_norm=5, shuffle=False, batch_size=128, num_workers=16, lr=1e-3, momentum=0.0, l2=0.0):
+                early_stop=True, max_norm=5, lr=1e-3, momentum=0.0, l2=0.0, log_dir=None, comment=''):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
@@ -35,9 +36,14 @@ class Solver(object):
 
         self._reset()
 
+        self.writer = SummaryWriter(log_dir, comment=comment)
     def _reset(self):
         # Reset
         load = self.continue_from and os.path.exists(self.continue_from)
+        self.start_epoch = 0
+        self.val_no_impv = 0
+        self.prev_val_loss = float("inf")
+        self.best_val_loss = float("inf")
         if load: # if the checkpoint model exists
             print('Loading checkpoint model %s' % self.continue_from)
             package = torch.load(self.continue_from)
@@ -46,14 +52,16 @@ class Solver(object):
             self.start_epoch = int(package.get('epoch', 1))
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
             self.cv_loss[:self.start_epoch] = package['cv_loss'][:self.start_epoch]
-        else:
-            self.start_epoch = 0
+            self.val_no_impv = package.get('val_no_impv', 0)
+            if 'random_state' in package:
+                torch.set_rng_state(package['random_state'])
+            
+            self.prev_val_loss = self.cv_loss[self.start_epoch-1]
+            self.best_val_loss = min(self.cv_loss[:self.start_epoch])
+
         # Create save folder
         os.makedirs(self.save_folder, exist_ok=True)
-        self.prev_val_loss = float("inf") if not load else self.cv_loss[:self.start_epoch-1]
-        self.best_val_loss = float("inf") if not load else min(self.cv_loss[:self.start_epoch])
         self.halving = False
-        self.val_no_impv = 0
 
     def train(self):
         # Train model multi-epoches
@@ -79,6 +87,7 @@ class Solver(object):
                   'Valid Loss {2:.3f}'.format(
                       epoch + 1, time.time() - start, val_loss))
             print('-' * 85)
+            self.writer.add_scalar('Loss/per epoch cv', val_loss, epoch)
 
             # Adjust learning rate (halving)
             if self.half_lr:
@@ -87,7 +96,7 @@ class Solver(object):
                     if self.val_no_impv >= 3:
                         self.halving = True
                     if self.val_no_impv >= 10 and self.early_stop:
-                        print("No imporvement for 10 epochs, early stopping.")
+                        print("No improvement for 10 epochs, early stopping.")
                         break
                 else:
                     self.val_no_impv = 0
@@ -107,7 +116,9 @@ class Solver(object):
             package = self.model.module.serialize(self.model.module,
                                                        self.optimizer, epoch + 1,
                                                        tr_loss=self.tr_loss,
-                                                       cv_loss=self.cv_loss)
+                                                       cv_loss=self.cv_loss,
+                                                       val_no_impv = self.val_no_impv,
+                                                       random_state=torch.get_rng_state())
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 file_path = os.path.join(self.save_folder, self.model_path)
@@ -135,7 +146,11 @@ class Solver(object):
             padded_mixture = padded_mixture.cuda()
             mixture_lengths = mixture_lengths.cuda()
             padded_source = padded_source.cuda()
-            estimate_source_list = self.model(padded_mixture)
+            try:
+                estimate_source_list = self.model(padded_mixture)
+            except:
+                print(padded_mixture.shape)
+                continue
             loss = []
             for estimate_source in estimate_source_list:
                 step_loss, max_snr, estimate_source, reorder_estimate_source = \
@@ -145,13 +160,16 @@ class Solver(object):
                 loss = torch.stack(loss).mean()
             else:
                 loss = loss[-1]
-            if not cross_valid:
-                self.optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(),
-                                               self.max_norm)
-                self.optimizer.step()
-
+            try:
+                if not cross_valid:
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(),
+                                                self.max_norm)
+                    self.optimizer.step()
+            except:
+                print(padded_mixture.shape)
+                continue
             total_loss += loss.item()
 
             if i % self.print_freq == 0:
@@ -160,5 +178,11 @@ class Solver(object):
                           epoch + 1, i + 1, total_loss / (i + 1),
                           loss.item(), 1000 * (time.time() - start) / (i + 1)),
                       flush=True)
+            
+            if not cross_valid:
+                self.writer.add_scalar('Loss/train', loss.item(), epoch*len(data_loader)+i)
+            else:
+                self.writer.add_scalar('Loss/cv', loss.item(), epoch*len(data_loader)+i)
+
 
         return total_loss / (i + 1)

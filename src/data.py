@@ -9,7 +9,7 @@ from scipy.io.wavfile import read
 from time import time
 
 class MixtureDataset(data.Dataset):
-    def __init__(self, txtfile, sample_rate=8000, segment=4.0, cv_maxlen=8.0): # segment and cv_maxlen not implemented
+    def __init__(self, txtfile, sample_rate=8000, maxlen=99999999): # segment and cv_maxlen not implemented
         """
         each line of textfile comes in the form of:
             filename1, dB1, filename2, dB2, ...
@@ -17,6 +17,7 @@ class MixtureDataset(data.Dataset):
         self.specs = np.loadtxt(txtfile, dtype = str) # the specification of what source audio files are in each example, and what their scales are
         self.root = "/ws/ifp-10_3/hasegawa/junzhez2/Variable_Speaker_Model/egs/wsj0/" # root of source file relative paths
         self.sample_rate = sample_rate
+        self.maxlen = maxlen
     def __len__(self):
         return len(self.specs)
     def __getitem__(self, idx):
@@ -31,10 +32,12 @@ class MixtureDataset(data.Dataset):
         scales = []
         for i in range(num_speakers):
             sr, sound = read(self.root + spec[i*2])
+            assert self.sample_rate==sr, 'you need to resample!'
+            if len(sound)>int(self.maxlen*sr):
+                sound = sound[:int(self.maxlen*sr)]
             assert sr == self.sample_rate,  'sampling rate is not %d'%self.sample_rate # during preprocessing all wavs are turned into 8000 sampling rate
             sources.append(sound)
             scales.append(10**(float(spec[i*2+1])/20)) # turn dB into amplitude scale
-        max_len = max(*[len(source) for source in sources])
         return sources, scales
 
 def _collate_fn(batch):

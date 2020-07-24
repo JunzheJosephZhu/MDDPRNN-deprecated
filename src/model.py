@@ -75,7 +75,7 @@ class MulCatModel(nn.Module):
         return model
 
     @staticmethod
-    def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
+    def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None, val_no_impv=None, random_state=None):
         package = {
             # state
             'state_dict': model.state_dict(),
@@ -85,6 +85,8 @@ class MulCatModel(nn.Module):
         if tr_loss is not None:
             package['tr_loss'] = tr_loss
             package['cv_loss'] = cv_loss
+            package['val_no_impv'] = val_no_impv
+            package['random_state'] = random_state
         return package
 
 
@@ -206,7 +208,9 @@ class MulCat_Block(nn.Module):
         # [BS, K, N]
         x = x.permute(0, 3, 2, 1).contiguous().view(B*S, K, N)
         # [BS, K, H + N]
+        self.intra_rnn1.flatten_parameters()
         x1, _ = self.intra_rnn1(x)
+        self.intra_rnn2.flatten_parameters()
         x2, _ = self.intra_rnn2(x)
         x = torch.cat((x1*x2, x), dim = 2)
         # [BS, K, N]
@@ -223,7 +227,9 @@ class MulCat_Block(nn.Module):
         # [BK, S, N]
         x = x.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
         # [BK, S, H + N]
+        self.inter_rnn1.flatten_parameters()
         x1, _ = self.inter_rnn1(x)
+        self.inter_rnn2.flatten_parameters()
         x2, _ = self.inter_rnn2(x)
         x = torch.cat((x1*x2, x), dim = 2)
         # [BK, S, N]

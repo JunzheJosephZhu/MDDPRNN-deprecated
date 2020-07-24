@@ -1,5 +1,5 @@
 {
-    "python.pythonPath": "/home/junzhez2/anaconda3/bin/python",
+    "python.pythonPath": "/ws/ifp-10_3/hasegawa/junzhez2/anaconda3/bin/python",
     // whitelist numpy to remove lint errors
     "python.linting.pylintArgs": [
         "--errors-only",
