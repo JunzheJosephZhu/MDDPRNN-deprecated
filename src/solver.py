@@ -130,8 +130,10 @@ class Solver(object):
                 file_path = os.path.join(
                     self.save_folder, 'epoch%d.pth.tar' % (epoch + 1))
                 torch.save(package, file_path)
-                torch.save(package, self.continue_from)
                 print('Saving checkpoint model to %s' % file_path)
+
+            # update last.pth
+            torch.save(package, os.path.join(self.save_folder, 'last.pth'))
 
 
 
@@ -153,8 +155,11 @@ class Solver(object):
                 continue
             loss = []
             for estimate_source in estimate_source_list:
-                step_loss, max_snr, estimate_source, reorder_estimate_source = \
-                    cal_loss(padded_source, estimate_source, mixture_lengths)
+                try:
+                    step_loss, max_snr, estimate_source, reorder_estimate_source = \
+                        cal_loss(padded_source, estimate_source, mixture_lengths)
+                except:
+                    assert False, 'Come to fix this shit!'
                 loss.append(step_loss)
             if not cross_valid: # training
                 loss = torch.stack(loss).mean()

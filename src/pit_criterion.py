@@ -5,6 +5,7 @@ from itertools import permutations
 
 import torch
 import torch.nn.functional as F
+import numpy as np
 
 EPS = 1e-8
 
@@ -58,8 +59,15 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths):
     # e_noise = s' - s_target
     e_noise = s_estimate - pair_wise_proj  # [B, C, C, T]
     # SI-SNR = 10 * log_10(||s_target||^2 / ||e_noise||^2)
-    pair_wise_si_snr = torch.sum(pair_wise_proj ** 2, dim=3) / (torch.sum(e_noise ** 2, dim=3) + EPS)
-    pair_wise_si_snr = 10 * torch.log10(pair_wise_si_snr + EPS)  # [B, C, C]
+    # pair_wise_si_snr = torch.sum(pair_wise_proj ** 2, dim=3) / (torch.sum(e_noise ** 2, dim=3) + EPS)
+    # pair_wise_si_snr = 10 * torch.log10(pair_wise_si_snr + EPS)  # [B, C, C]
+
+    log_sig_e = torch.log10(torch.sum(pair_wise_proj**2, dim=3) + EPS)
+    log_noi_e = torch.log10(torch.sum(e_noise**2, dim=3) + EPS)
+    pair_wise_si_snr = 10 * (log_sig_e - log_noi_e)
+    assert not torch.isnan(log_sig_e).bool().any(), 'signal energy infinity '+str(torch.max(estimate_source))+str(torch.min(estimate_source))
+    assert not torch.isnan(log_noi_e).bool().any(), 'signal energy infinity '+str(torch.max(estimate_source))+str(torch.min(estimate_source))
+    
 
     # Get max_snr of each utterance
     # permutations, [C!, C]

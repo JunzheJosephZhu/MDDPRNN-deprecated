@@ -8,7 +8,7 @@
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
-            "program": "${file}",
+            "program": "/ws/ifp-10_3/hasegawa/junzhez2/Variable_Speaker_Model/src/train.py",
             "console": "integratedTerminal"
         }
     ]
