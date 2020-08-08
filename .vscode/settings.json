@@ -10,6 +10,8 @@
         "**/.git/subtree-cache/**": true,
         "**/node_modules/*/**": true,
         "**/.hg/store/**": true,
-        "**/egs/**": true
+        "**/egs/**": true,
+        "dataset/**": true,
+        "**/*.wav": true
     }
 }

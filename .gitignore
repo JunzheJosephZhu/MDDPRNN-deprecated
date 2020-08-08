@@ -2,6 +2,8 @@ egs/*/data
 egs/*/exp
 egs/*
 
+dataset/
+
 tools/sph2pipe_v2.5
 tools/create-speaker-mixtures
 

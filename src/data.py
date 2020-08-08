@@ -7,81 +7,119 @@ import torch
 import torch.utils.data as data
 from scipy.io.wavfile import read
 from time import time
+import glob
+import os
+import random
+import json
+random.seed(0)
+def load_json(filename):
+    with open(filename) as f:
+        data = json.load(f)
+    return data
+
+def printlist(filelist, length=100):
+    for i in range(length):
+        print(filelist[i])
+
+def pad_audio(audio, len_samples=4*8000):
+    if len(audio) < len_samples:
+        audio = np.concatenate([audio, np.zeros(len_samples - len(audio))])
+    return audio
 
 class MixtureDataset(data.Dataset):
-    def __init__(self, txtfile, sample_rate=8000, maxlen=99999999): # segment and cv_maxlen not implemented
+    def __init__(self, root, json_folders, sr=8000, seglen=4.0, minlen=2.0): # segment and cv_maxlen not implemented
         """
         each line of textfile comes in the form of:
             filename1, dB1, filename2, dB2, ...
+            args:
+                root: folder where dataset/ is located
+                json_folders: folders containing json files, **/dataset/#speakers/wav8k/min/tr/**
+                sr: sample rate
+                seglen: length of each segment in seconds
+                minlen: minimum segment length
         """
-        self.specs = np.loadtxt(txtfile, dtype = str) # the specification of what source audio files are in each example, and what their scales are
-        self.root = "/ws/ifp-10_3/hasegawa/junzhez2/Variable_Speaker_Model/egs/wsj0/" # root of source file relative paths
-        self.sample_rate = sample_rate
-        self.maxlen = maxlen
+        seglen = int(seglen*sr)
+        minlen = int(minlen*sr)
+        self.sr = sr
+        self.mixes = []
+        for json_folder in json_folders:
+            mixfiles, wavlens = list(zip(*load_json(os.path.join(root, json_folder, 'mix.json')))) # list of 20000 filenames, and 20000 lengths
+            mixfiles = [os.path.join(root, mixfile.split('dataset/')[1]) for mixfile in mixfiles]
+            sig_json = [load_json(file) for file in sorted(glob.glob(os.path.join(root, json_folder, 's*.json')))] # list C, each have 20000 filenames
+            for i, spkr_json in enumerate(sig_json):
+                sig_json[i] = [os.path.join(root, line[0].split('dataset/')[1]) for line in spkr_json] # list C, each have 20000 filenames
+            siglists = list(zip(*sig_json)) # list of 20000, each have C filenames
+            self.mixes += list(zip(mixfiles, siglists, wavlens))
+        #printlist(self.mixes)
+        self.examples = []
+        for i, mix in enumerate(self.mixes):
+            if mix[2] < minlen:
+                continue
+            start = 0
+            while start + minlen <= mix[2]:
+                end = min(start + seglen, mix[2])
+                self.examples.append({'mixfile': mix[0], 'sourcefiles': mix[1], 'start': start, 'end':end})
+                start += minlen
+        self.examples = random.sample(self.examples, len(self.examples))
     def __len__(self):
-        return len(self.specs)
+        return len(self.examples)
     def __getitem__(self, idx):
         """
         Returns:
-            sources: list of num_speakers sounds, each of a different length
-            scales: list of num_speakers scales, in the same order as sources
+            mixture: [T]
+            sources: list of C, each [T]
         """
-        spec = self.specs[idx]
-        num_speakers = len(spec)//2 # supports any number of speakers in mixture
-        sources = []
-        scales = []
-        for i in range(num_speakers):
-            sr, sound = read(self.root + spec[i*2])
-            assert self.sample_rate==sr, 'you need to resample!'
-            if len(sound)>int(self.maxlen*sr):
-                sound = sound[:int(self.maxlen*sr)]
-            assert sr == self.sample_rate,  'sampling rate is not %d'%self.sample_rate # during preprocessing all wavs are turned into 8000 sampling rate
-            sources.append(sound)
-            scales.append(10**(float(spec[i*2+1])/20)) # turn dB into amplitude scale
-        return sources, scales
+        example = self.examples[idx]
+        mixfile, sourcefiles, start, end = example['mixfile'], example['sourcefiles'], example['start'], example['end']
+        sr, mixture = read(mixfile)
+        assert sr == self.sr, 'need to resample'
+        mixture = mixture[start:end]
+        sources = [read(sourcefile)[1][start:end] for sourcefile in sourcefiles]
+        return mixture, sources
 
 def _collate_fn(batch):
     """
     Args:
-        batch: list, len(batch) = batch_size, each entry is a tuple of (sources, scales)
+        batch: list, len(batch) = batch_size, each entry is a tuple of (mixture, sources)
     Returns:
-        mixtures_pad: B x T, torch.Tensor, padded mixtures
+        mixtures_list: B x T, torch.Tensor, padded mixtures
         ilens : B, torch.Tensor, length of each mixture before padding
-        sources_pad: list of B Tensors, each C x T, where C is (possibly variable) number of source audios
+        sources_list: list of B Tensors, each C x T, where C is (variable) number of source audios
     """
     ilens = [] # shape of mixtures
     mixtures = [] # mixtures, same length as longest source in whole batch
-    sources_pad = [] # padded sources, same length as mixtures
-    for sources, scales in batch: # compute length to pad to
-        ilens.append(max(*[len(source) for source in sources]))
-
-    maxlen = max(ilens) # compute length to pad to
-    ilens = torch.Tensor(np.array(ilens)).int()
-
-    for sources, scales in batch:
-        source_pad = np.array([pad(audio, maxlen) for audio in sources]) # one example, CXT
-        source_pad = torch.Tensor(source_pad).float() # pad sources in one example
-        sources_pad.append(source_pad)
-        mixture = torch.matmul(source_pad.T, torch.Tensor(scales)) # add sources according to scale for one example
-        mixtures.append(mixture)
-
-    mixtures = torch.stack(mixtures, dim = 0)
-    sources_pad = torch.stack(sources_pad, dim = 0)
-
-    return mixtures, ilens, sources_pad
-
-def pad(audio, length):
-    padded = np.zeros(length)
-    padded[:len(audio)] = audio
-    return padded
-
+    sources_list = [] # padded sources, same length as mixtures
+    for mixture, sources in batch: # compute length to pad to
+        assert len(mixture) == len(sources[0])
+        assert len(mixture) <= 32000
+        ilens.append(len(mixture))
+        mixtures.append(pad_audio(mixture))
+        sources = torch.Tensor(np.stack([pad_audio(source) for source in sources], axis=0)).float().cuda()
+        sources_list.append(sources)
+    mixtures = torch.Tensor(np.stack(mixtures, axis=0)).float().cuda()
+    ilens = np.stack(ilens)
+    return mixtures, ilens, sources_list
 
 
 if __name__ == "__main__":
-    dataset = MixtureDataset("/ws/ifp-10_3/hasegawa/junzhez2/Variable_Speaker_Model/csv/mixtures/mix_2_spk_tr.txt")
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size = 32, collate_fn = _collate_fn)
-    for mixtures, ilens, sources_pad in dataloader:
+    root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/dataset"
+    tr_json = ["2spkr_json/tr/",
+                "3spkr_json/tr/",
+                "4spkr_json/tr/",
+                "5spkr_json/tr/"]
+    val_json = ["2spkr_json/cv/",
+                "3spkr_json/cv/",
+                "4spkr_json/cv/",
+                "5spkr_json/cv/"]
+    test_json = ["2spkr_json/tt",
+                "3spkr_json/tt",
+                "4spkr_json/tt",
+                "5spkr_json/tt"]
+    dataset = MixtureDataset(root, tr_json)
+    dataset[0]
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size = 4, collate_fn = _collate_fn)
+    for mixtures, ilens, sources_list in dataloader:
         start = time()
-        print(mixtures.shape, ilens.shape, sources_pad.shape)
+        print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
         print(time() - start)
     print(len(dataset))

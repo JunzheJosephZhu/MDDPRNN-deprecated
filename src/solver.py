@@ -93,7 +93,7 @@ class Solver(object):
             if self.half_lr:
                 if val_loss >= self.prev_val_loss:
                     self.val_no_impv += 1
-                    if self.val_no_impv >= 3:
+                    if self.val_no_impv >= 2: # 3 is too much
                         self.halving = True
                     if self.val_no_impv >= 10 and self.early_stop:
                         print("No improvement for 10 epochs, early stopping.")
@@ -101,13 +101,21 @@ class Solver(object):
                 else:
                     self.val_no_impv = 0
             if self.halving:
+                # optim_state = self.optimizer.state_dict()
+                # optim_state['param_groups'][0]['lr'] = \
+                #     optim_state['param_groups'][0]['lr'] / 2.0
+                # self.optimizer.load_state_dict(optim_state)
+                # print('Learning rate adjusted to: {lr:.6f}'.format(
+                #     lr=optim_state['param_groups'][0]['lr']))
+                # self.halving = False
+                pass
+            if epoch%2 == 1:
                 optim_state = self.optimizer.state_dict()
                 optim_state['param_groups'][0]['lr'] = \
-                    optim_state['param_groups'][0]['lr'] / 2.0
+                    optim_state['param_groups'][0]['lr'] * 0.98
                 self.optimizer.load_state_dict(optim_state)
                 print('Learning rate adjusted to: {lr:.6f}'.format(
                     lr=optim_state['param_groups'][0]['lr']))
-                self.halving = False
             self.prev_val_loss = val_loss
 
             # Save the best model
@@ -149,22 +157,23 @@ class Solver(object):
             mixture_lengths = mixture_lengths.cuda()
             padded_source = padded_source.cuda()
             try:
-                estimate_source_list = self.model(padded_mixture)
-            except:
-                print(padded_mixture.shape)
+                estimate_source_list = [self.model(padded_mixture)] ######################3
+            except Exception as e:
+                print('forward prop failed', padded_mixture.shape, e)
                 continue
             loss = []
             for estimate_source in estimate_source_list:
                 try:
                     step_loss, max_snr, estimate_source, reorder_estimate_source = \
                         cal_loss(padded_source, estimate_source, mixture_lengths)
-                except:
-                    assert False, 'Come to fix this shit!'
+                except Exception as e:
+                    assert False, e
                 loss.append(step_loss)
             if not cross_valid: # training
-                loss = torch.stack(loss).mean()
+                #loss = torch.stack(loss).mean()
+                loss = loss[-1] 
             else:
-                loss = loss[-1]
+                loss = loss[-1] 
             try:
                 if not cross_valid:
                     self.optimizer.zero_grad()
@@ -172,8 +181,8 @@ class Solver(object):
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(),
                                                 self.max_norm)
                     self.optimizer.step()
-            except:
-                print(padded_mixture.shape)
+            except Exception as e:
+                print('backprop failed', padded_mixture.shape, e)
                 continue
             total_loss += loss.item()
 
