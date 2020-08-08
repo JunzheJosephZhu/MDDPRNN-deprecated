@@ -49,10 +49,10 @@ momentum = 0.0
 l2 = 0.0 # weight decya
 save_folder = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/models"
 checkpoint = 1
-continue_from = save_folder+"dummy"#+"/last.pth"
+continue_from = save_folder+'dummy'#+"/last.pth"
 model_path = "best.pth"
 print_freq = 10
-comment = 'changed mixing to matlab-using hungarian algorithm and variable speaker dataset, but still training on 2spkrs'
+comment = 'use librosa to load-fix numerical stability issue'
 log_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/runs/"+time.strftime("%Y%m%d-%H%M%S")+comment
 
 

@@ -5,7 +5,7 @@ Author: Junzhe Zhu
 import numpy as np
 import torch
 import torch.utils.data as data
-from scipy.io.wavfile import read
+from librosa import load
 from time import time
 import glob
 import os
@@ -72,10 +72,10 @@ class MixtureDataset(data.Dataset):
         """
         example = self.examples[idx]
         mixfile, sourcefiles, start, end = example['mixfile'], example['sourcefiles'], example['start'], example['end']
-        sr, mixture = read(mixfile)
+        mixture, sr = load(mixfile, sr=self.sr)
         assert sr == self.sr, 'need to resample'
         mixture = mixture[start:end]
-        sources = [read(sourcefile)[1][start:end] for sourcefile in sourcefiles]
+        sources = [load(sourcefile, sr=sr)[0][start:end] for sourcefile in sourcefiles]
         return mixture, sources
 
 def _collate_fn(batch):
@@ -121,6 +121,6 @@ if __name__ == "__main__":
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, collate_fn=_collate_fn)
     for mixtures, ilens, sources_list in tqdm(dataloader):
         start = time()
-        #print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
-        #print(time() - start)
+        # print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
+        # print(time() - start)
     print(len(dataset))

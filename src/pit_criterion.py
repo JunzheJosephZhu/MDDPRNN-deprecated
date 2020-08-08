@@ -10,27 +10,32 @@ from scipy.optimize import linear_sum_assignment
 
 EPS = 1e-8
 
+def stable_mean(tensor, dim, keepdim=False):
+    return torch.sum(tensor/tensor.size(dim), dim=dim, keepdim=keepdim)
 
-def cal_loss(source, estimate_source, source_lengths):
+
+def cal_loss(source, estimate_source, source_lengths, debug=False):
     """
     Args:
         source: [B, C, T], B is batch size
         estimate_source: [B, 5, T]
         source_lengths: [B]
     """
-    max_snr, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths)
+    max_snr, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug)
     loss = 0 - torch.mean(max_snr)
     #reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     return loss, onoff_target#, estimate_source, reorder_estimate_source
 
 
-def cal_si_snr_with_pit(source, estimate_source, source_lengths):
+def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug):
     """Calculate SI-SNR with PIT training.
     Args:
         source: list of [B], each item is [C, T]
         estimate_source: [B, 5, T]
         source_lengths: [B], each item is between [0, T]
     """
+
+
     assert len(source) == len(estimate_source)
     assert source[0].size(1) == estimate_source.size(2)
 
@@ -44,7 +49,7 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths):
     onoff_target = torch.zeros(B, max_C)
 
     for batch_idx in range(B):
-        # source[batch+idx]: [C, T]
+        # source[batch_idx]: [C, T]
         # estimate_source[batch_idx]: [5, T]
         # Step 1. Zero-mean norm
         C = source[batch_idx].size(0)
@@ -62,34 +67,36 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths):
         s_target = torch.unsqueeze(zero_mean_target, dim=0)  # [1, C, T]
         s_estimate = torch.unsqueeze(zero_mean_estimate, dim=1)  # [5, 1, T]
         # s_target = <s', s>s / ||s||^2
-        pair_wise_dot = torch.sum(s_estimate * s_target, dim=2, keepdim=True)  # [5, C, 1]
-        s_target_energy = torch.sum(s_target ** 2, dim=2, keepdim=True) + EPS  # [1, C, 1]
-        pair_wise_proj = pair_wise_dot * s_target   # [5, C, T], put the target energy term somewhere else
+        pair_wise_dot = stable_mean(s_estimate * s_target, dim=2, keepdim=True)  # [5, C, 1]
+        s_target_energy = stable_mean(s_target ** 2, dim=2, keepdim=True) + EPS  # [1, C, 1]
+        pair_wise_proj = pair_wise_dot * s_target / s_target_energy  # [5, C, T], put the target energy term somewhere else
         # e_noise = s' - s_target
-        e_noise = s_estimate - pair_wise_proj / s_target_energy  # [5, C, T]
+        e_noise = s_estimate - pair_wise_proj  # [5, C, T]
         # SI-SNR = 10 * log_10(||s_target||^2 / ||e_noise||^2)
-        # pair_wise_si_snr = torch.sum(pair_wise_proj ** 2, dim=3) / (torch.sum(e_noise ** 2, dim=3) + EPS)
-        # pair_wise_si_snr = 10 * torch.log10(pair_wise_si_snr + EPS)  # [B, C, C]
-        log_sig_e = torch.log10(torch.sum(pair_wise_proj ** 2, dim=2) + EPS) - 2 * torch.log10(torch.sum(s_target_energy, dim=2) + EPS)
-        log_noi_e = torch.log10(torch.sum(e_noise**2, dim=2) + EPS)
-        pair_wise_si_snr = 10 * (log_sig_e - log_noi_e) # [5, C]
-        assert not torch.isnan(log_sig_e).bool().any(), 'signal energy infinity '+str(torch.max(estimate_source))+str(torch.min(estimate_source))
-        assert not torch.isnan(log_noi_e).bool().any(), 'signal energy infinity '+str(torch.max(estimate_source))+str(torch.min(estimate_source))
-        
+        pair_wise_si_snr = stable_mean(pair_wise_proj ** 2, dim=2) / (stable_mean(e_noise ** 2, dim=2) + EPS)
+        pair_wise_si_snr = 10 * torch.log10(pair_wise_si_snr + EPS)  # [B, C, C]
+
+
+        if not debug:
+            np.savetxt('log/pair_wise_si_snr.txt', pair_wise_si_snr.detach().cpu().numpy())
+            np.save('log/source.npy', torch.stack(source).detach().cpu().numpy())
+            np.save('log/estimate_source.npy', estimate_source.detach().cpu().numpy())
+            np.save('log/source_lengths.npy', source_lengths.detach().cpu().numpy())
+        else:
+            print('batch_')
+            print('pair_wise_dot', pair_wise_dot)
+            print('s_target', s_target)
+            print('s_target_energy', s_target_energy)
+            print('pair_wise_proj', pair_wise_proj)
+            print('e_noise', e_noise)
+            print('si-snr', pair_wise_si_snr)
+
         row_idx, col_idx = linear_sum_assignment(-pair_wise_si_snr.detach().cpu())
-        max_snr[batch_idx] = pair_wise_si_snr[row_idx, col_idx].sum()/C
+        max_snr[batch_idx] = pair_wise_si_snr[row_idx, col_idx].mean()
         onoff_target[batch_idx][row_idx] = 1
-    # # Get max_snr of each utterance
-    # # permutations, [C!, C]
-    # perms = source.new_tensor(list(permutations(range(C))), dtype=torch.long)
-    # # one-hot, [C!, C, C]
-    # index = torch.unsqueeze(perms, 2)
-    # perms_one_hot = source.new_zeros((*perms.size(), C)).scatter_(2, index, 1)
-    # # [B, C!] <- [B, C, C] einsum [C!, C, C], SI-SNR sum of each permutation
-    # snr_set = torch.einsum('bij,pij->bp', [pair_wise_si_snr, perms_one_hot])
-    # max_snr_idx = torch.argmax(snr_set, dim=1)  # [B]
-    # # max_snr = torch.gather(snr_set, 1, max_snr_idx.view(-1, 1))  # [B, 1]
-    # max_snr, _ = torch.max(snr_set, dim=1, keepdim=True)
+
+    if debug:
+        print('max_snr', max_snr)
     return max_snr, onoff_target
 
 
@@ -132,8 +139,8 @@ def get_mask(source, source_lengths):
 
 if __name__ == "__main__":
     torch.manual_seed(123)
-    testcase = 0
-    if testcase == 0:
+    testcase = 2
+    if testcase == 0: # answer is around 80-90 ish
         B, C, T = 2, 5, 12
         # fake data
         estimate_source = torch.randint(5, (B, C, T)).float()
@@ -145,8 +152,7 @@ if __name__ == "__main__":
         estimate_source[1, :, -3:] = 0
         source_lengths = torch.LongTensor([T, T-3])
 
-
-    elif testcase == 1:
+    elif testcase == 1: # [-7.4823, -7.9822], 7.7322
         B, C, T = 2, 3, 12
         # fake data
         source = torch.randint(4, (B, C, T)).float()
@@ -157,7 +163,12 @@ if __name__ == "__main__":
         #print('source', source)
         #print('estimate_source', estimate_source)
         #print('source_lengths', source_lengths)
-        
-    loss, onoff_target = cal_loss(source, estimate_source, source_lengths)
+    
+    elif testcase == 2: # [ 5.8286,  9.7933, 11.6814, 12.6987], 10.0005
+        source = torch.Tensor(np.load('log_overflow_case3/source.npy'))
+        source_lengths = torch.Tensor(np.load('log_overflow_case3/source_lengths.npy')).int()
+        estimate_source = torch.Tensor(np.load('log_overflow_case3/estimate_source.npy'))
+        #print(source)
+    loss, onoff_target = cal_loss(source, estimate_source, source_lengths, debug=True)
     print('loss', loss)
     print('on/off target', onoff_target)
