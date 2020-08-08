@@ -11,7 +11,7 @@ import glob
 import os
 import random
 import json
-random.seed(0)
+from tqdm import tqdm
 def load_json(filename):
     with open(filename) as f:
         data = json.load(f)
@@ -60,6 +60,7 @@ class MixtureDataset(data.Dataset):
                 end = min(start + seglen, mix[2])
                 self.examples.append({'mixfile': mix[0], 'sourcefiles': mix[1], 'start': start, 'end':end})
                 start += minlen
+        random.seed(0)
         self.examples = random.sample(self.examples, len(self.examples))
     def __len__(self):
         return len(self.examples)
@@ -97,7 +98,7 @@ def _collate_fn(batch):
         sources = torch.Tensor(np.stack([pad_audio(source) for source in sources], axis=0)).float().cuda()
         sources_list.append(sources)
     mixtures = torch.Tensor(np.stack(mixtures, axis=0)).float().cuda()
-    ilens = np.stack(ilens)
+    ilens = torch.Tensor(np.stack(ilens)).int().cuda()
     return mixtures, ilens, sources_list
 
 
@@ -117,9 +118,9 @@ if __name__ == "__main__":
                 "5spkr_json/tt"]
     dataset = MixtureDataset(root, tr_json)
     dataset[0]
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size = 4, collate_fn = _collate_fn)
-    for mixtures, ilens, sources_list in dataloader:
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, collate_fn=_collate_fn)
+    for mixtures, ilens, sources_list in tqdm(dataloader):
         start = time()
-        print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
-        print(time() - start)
+        #print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
+        #print(time() - start)
     print(len(dataset))

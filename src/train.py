@@ -15,8 +15,20 @@ torch.manual_seed(0)
 torch.backends.cudnn.benchmark=False
 torch.backends.cudnn.deterministic=True
 
-train_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/csv/mixtures/mix_2_spk_tr.txt"
-valid_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/csv/mixtures/mix_2_spk_cv.txt"
+root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/dataset"
+tr_json = ["2spkr_json/tr/",
+            "3spkr_json/tr/",
+            "4spkr_json/tr/",
+            "5spkr_json/tr/"][:1]
+val_json = ["2spkr_json/cv/",
+            "3spkr_json/cv/",
+            "4spkr_json/cv/",
+            "5spkr_json/cv/"][:1]
+test_json = ["2spkr_json/tt",
+            "3spkr_json/tt",
+            "4spkr_json/tt",
+            "5spkr_json/tt"][:1]
+
 sample_rate = 8000
 maxlen = 4
 N = 64 
@@ -32,24 +44,23 @@ early_stop = True
 max_norm = 5
 shuffle = False
 batch_size = 4
-num_workers = 0
 lr = 1e-3
 momentum = 0.0
 l2 = 0.0 # weight decya
 save_folder = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/models"
 checkpoint = 1
-continue_from = save_folder+"/last.pth"
+continue_from = save_folder+"dummy"#+"/last.pth"
 model_path = "best.pth"
 print_freq = 10
-log_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/runs/"+time.strftime("%Y%m%d-%H%M%S")
-comment = 'fixed normalization, also implemented loss with three log terms.'
+comment = 'changed mixing to matlab-using hungarian algorithm and variable speaker dataset, but still training on 2spkrs'
+log_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/runs/"+time.strftime("%Y%m%d-%H%M%S")+comment
 
 
 if __name__ == '__main__':
-    tr_dataset = MixtureDataset(train_dir, sample_rate=sample_rate, maxlen=maxlen)
-    cv_dataset = MixtureDataset(valid_dir, sample_rate=sample_rate, maxlen=maxlen)  # -1 -> use full audio
-    tr_loader = torch.utils.data.DataLoader(tr_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle, num_workers=num_workers)
-    cv_loader = torch.utils.data.DataLoader(cv_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle, num_workers=num_workers)
+    tr_dataset = MixtureDataset(root, tr_json)
+    cv_dataset = MixtureDataset(root, val_json)
+    tr_loader = torch.utils.data.DataLoader(tr_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
+    cv_loader = torch.utils.data.DataLoader(cv_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
     # model
     model = torch.nn.DataParallel(Dual_RNN_model(256, 64, 128, bidirectional=True, num_layers=6, K=250).cuda())

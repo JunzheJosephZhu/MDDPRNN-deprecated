@@ -151,11 +151,7 @@ class Solver(object):
 
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
-        for i, (data) in enumerate(data_loader):
-            padded_mixture, mixture_lengths, padded_source = data
-            padded_mixture = padded_mixture.cuda()
-            mixture_lengths = mixture_lengths.cuda()
-            padded_source = padded_source.cuda()
+        for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
             try:
                 estimate_source_list = [self.model(padded_mixture)] ######################3
             except Exception as e:
@@ -163,11 +159,8 @@ class Solver(object):
                 continue
             loss = []
             for estimate_source in estimate_source_list:
-                try:
-                    step_loss, max_snr, estimate_source, reorder_estimate_source = \
+                step_loss, onoff_target = \
                         cal_loss(padded_source, estimate_source, mixture_lengths)
-                except Exception as e:
-                    assert False, e
                 loss.append(step_loss)
             if not cross_valid: # training
                 #loss = torch.stack(loss).mean()
@@ -185,7 +178,7 @@ class Solver(object):
                 print('backprop failed', padded_mixture.shape, e)
                 continue
             total_loss += loss.item()
-
+            
             if i % self.print_freq == 0:
                 print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
                       'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(

@@ -76,11 +76,9 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths):
         assert not torch.isnan(log_sig_e).bool().any(), 'signal energy infinity '+str(torch.max(estimate_source))+str(torch.min(estimate_source))
         assert not torch.isnan(log_noi_e).bool().any(), 'signal energy infinity '+str(torch.max(estimate_source))+str(torch.min(estimate_source))
         
-        row_idx, col_idx = linear_sum_assignment(-pair_wise_si_snr)
-        print(row_idx, col_idx)
+        row_idx, col_idx = linear_sum_assignment(-pair_wise_si_snr.detach().cpu())
         max_snr[batch_idx] = pair_wise_si_snr[row_idx, col_idx].sum()/C
         onoff_target[batch_idx][row_idx] = 1
-    print(max_snr)
     # # Get max_snr of each utterance
     # # permutations, [C!, C]
     # perms = source.new_tensor(list(permutations(range(C))), dtype=torch.long)
