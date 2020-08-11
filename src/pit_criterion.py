@@ -83,7 +83,10 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug):
             np.save('log/estimate_source.npy', estimate_source.detach().cpu().numpy())
             np.save('log/source_lengths.npy', source_lengths.detach().cpu().numpy())
         else:
-            print('batch_')
+            print('-'*100, '\nbatch_idx', batch_idx)
+            print('source_len', source_lengths[batch_idx])
+            print('source', source[batch_idx])
+            print('estimate_source', estimate_source[batch_idx])
             print('pair_wise_dot', pair_wise_dot)
             print('s_target', s_target)
             print('s_target_energy', s_target_energy)
@@ -139,7 +142,7 @@ def get_mask(source, source_lengths):
 
 if __name__ == "__main__":
     torch.manual_seed(123)
-    testcase = 2
+    testcase = 3
     if testcase == 0: # answer is around 80-90 ish
         B, C, T = 2, 5, 12
         # fake data
@@ -168,7 +171,12 @@ if __name__ == "__main__":
         source = torch.Tensor(np.load('log_overflow_case3/source.npy'))
         source_lengths = torch.Tensor(np.load('log_overflow_case3/source_lengths.npy')).int()
         estimate_source = torch.Tensor(np.load('log_overflow_case3/estimate_source.npy'))
-        #print(source)
+
+    elif testcase == 3: # ongoing
+        source = torch.Tensor(np.load('log/source.npy'))
+        source_lengths = torch.Tensor(np.load('log/source_lengths.npy')).int()
+        estimate_source = torch.Tensor(np.load('log/estimate_source.npy'))
+
     loss, onoff_target = cal_loss(source, estimate_source, source_lengths, debug=True)
     print('loss', loss)
     print('on/off target', onoff_target)
