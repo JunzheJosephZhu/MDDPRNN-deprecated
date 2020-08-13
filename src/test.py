@@ -98,7 +98,7 @@ if __name__ == '__main__':
     model = Dual_RNN_model(256, 64, 128, bidirectional=True, num_layers=6, K=250).cuda(device)
     state_dict = torch.load(model_path, map_location=torch.device('cuda:'+str(device)))['model_state_dict']
     model.load_state_dict(state_dict)
-    print(torch.load(model_path, map_location=torch.device('cuda:'+str(device)))['epoch'])
+    print('epoch', torch.load(model_path, map_location=torch.device('cuda:'+str(device)))['epoch'])
     model.eval()
     total_loss = []
     with torch.no_grad():

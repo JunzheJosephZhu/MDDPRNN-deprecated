@@ -9,7 +9,6 @@ import torch
 
 from data import MixtureDataset, _collate_fn
 from solver import Solver
-from model import Dual_RNN_model
 import time
 torch.manual_seed(0)
 torch.backends.cudnn.benchmark=False
@@ -54,6 +53,11 @@ model_path = "best.pth"
 print_freq = 10
 comment = 'use librosa to load-fix numerical stability issue'
 log_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/runs/"+time.strftime("%Y%m%d-%H%M%S")+comment
+use_mulcat = True
+if use_mulcat:
+    from model_mulcat import Dual_RNN_model
+else:
+    from model import Dual_RNN_model
 
 
 if __name__ == '__main__':
