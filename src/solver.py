@@ -3,7 +3,7 @@
 
 import os
 import time
-
+import numpy as np
 import torch
 
 from pit_criterion import cal_loss
@@ -148,25 +148,28 @@ class Solver(object):
     def _run_one_epoch(self, epoch, cross_valid=False):
         start = time.time()
         total_loss = 0
-
+        total_accuracy = 0
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
         for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
             try:
-                estimate_source_list = [self.model(padded_mixture)] ######################3
+                estimate_source_list = self.model(padded_mixture) ######################3
             except Exception as e:
                 print('forward prop failed', padded_mixture.shape, e)
                 continue
             loss = []
-            for estimate_source in estimate_source_list:
-                step_loss, onoff_target = \
-                        cal_loss(padded_source, estimate_source, mixture_lengths)
+            accuracy = []
+            for (estimate_source, onoff) in estimate_source_list:
+                step_loss, acc = \
+                        cal_loss(padded_source, estimate_source, mixture_lengths, onoff)
                 loss.append(step_loss)
+                accuracy.append(acc)
             if not cross_valid: # training
-                #loss = torch.stack(loss).mean()
-                loss = loss[-1] 
+                loss = torch.stack(loss).mean()
+                accuracy = torch.stack(accuracy).mean()
             else:
                 loss = loss[-1] 
+                accuracy = accuracy[-1]
             try:
                 if not cross_valid:
                     self.optimizer.zero_grad()
@@ -178,12 +181,14 @@ class Solver(object):
                 print('backprop failed', padded_mixture.shape, e)
                 continue
             total_loss += loss.item()
-            
+            total_accuracy += accuracy.item()
+
             if i % self.print_freq == 0:
                 print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-                      'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
+                      'Current Loss {3:.6f} | Average accuracy {4:.3f} | {5:.1f} ms/batch'.format(
                           epoch + 1, i + 1, total_loss / (i + 1),
-                          loss.item(), 1000 * (time.time() - start) / (i + 1)),
+                          loss.item(), total_accuracy / (i + 1), 
+                          1000 * (time.time() - start) / (i + 1)),
                       flush=True)
             
             if not cross_valid:
