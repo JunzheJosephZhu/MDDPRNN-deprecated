@@ -1,14 +1,14 @@
 import time
-num_spks = 5
-sample_rate = 8000
+import sys
+import os
+comment = os.path.basename(sys.argv[0])
 maxlen = 4
-N = 64 
-L = 16 
-K = 100
-P = 50 
-H = 128 
-B = 6
-C = 2
+minlen = 2
+enc = 256 
+bottleneck = 64 
+hidden = 128
+num_layers = 6
+num_spks = 2
 epochs = 128
 half_lr = True
 early_stop = True
@@ -23,7 +23,7 @@ checkpoint = 1
 continue_from = save_folder+'dummy'#+"/last.pth"
 model_path = "best.pth"
 print_freq = 10
-comment = 'use librosa to load-fix numerical stability issue'
+comment += ''
 log_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/runs/"+time.strftime("%Y%m%d-%H%M%S")+comment
 use_mulcat = True
-multiloss = True
+multiloss = False

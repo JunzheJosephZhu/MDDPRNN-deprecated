@@ -34,13 +34,13 @@ else:
 
 
 if __name__ == '__main__':
-    tr_dataset = MixtureDataset(root, tr_json, seglen=4, minlen=2)
-    cv_dataset = MixtureDataset(root, val_json, seglen=4, minlen=2)
+    tr_dataset = MixtureDataset(root, tr_json, seglen=maxlen, minlen=minlen)
+    cv_dataset = MixtureDataset(root, val_json, seglen=maxlen, minlen=minlen)
     tr_loader = torch.utils.data.DataLoader(tr_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
     cv_loader = torch.utils.data.DataLoader(cv_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
     # model
-    model = torch.nn.DataParallel(Dual_RNN_model(256, 64, 128, bidirectional=True, num_layers=6, K=250, num_spks=num_spks, multiloss=multiloss).cuda())
+    model = torch.nn.DataParallel(Dual_RNN_model(enc, bottleneck, hidden, bidirectional=True, num_layers=num_layers, K=250, num_spks=num_spks, multiloss=multiloss).cuda())
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=l2)
     # solver
     solver = Solver(data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=print_freq,
