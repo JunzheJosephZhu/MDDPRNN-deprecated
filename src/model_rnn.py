@@ -382,7 +382,7 @@ class Dual_RNN_model(nn.Module):
     '''
     def __init__(self, in_channels, out_channels, hidden_channels,
                  kernel_size=2, rnn_type='LSTM', norm='ln', dropout=0,
-                 bidirectional=False, num_layers=4, K=200, num_spks=2):
+                 bidirectional=False, num_layers=4, K=200, num_spks=2, multiloss=False, mulcat=(False, False)):
         super(Dual_RNN_model,self).__init__()
         self.encoder = Encoder(kernel_size=kernel_size,out_channels=in_channels)
         self.separation = Dual_Path_RNN(in_channels, out_channels, hidden_channels,
@@ -402,8 +402,8 @@ class Dual_RNN_model(nn.Module):
         # [B, N, L] -> [B, L]
         out = [s[i]*e for i in range(self.num_spks)]
         audio = [self.decoder(out[i]) for i in range(self.num_spks)]
-        audio = torch.stack(audio, dim=1)
-        return audio
+        audio = torch.stack(audio, dim=1) # [B, spks, T]
+        return [(audio, torch.zeros((s.size(1), s.size(0))).cuda())]
         
     @staticmethod
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None, val_no_impv=None, random_state=None):
@@ -423,7 +423,7 @@ class Dual_RNN_model(nn.Module):
 
 
 if __name__ == "__main__":
-    rnn = Dual_RNN_model(256, 64, 128,bidirectional=True, norm='ln', num_layers=6)
+    rnn = Dual_RNN_model(256, 64, 128, bidirectional=True, norm='ln', num_layers=6)
     #encoder = Encoder(16, 512)
     x = torch.ones(1, 100)
     out = rnn(x)

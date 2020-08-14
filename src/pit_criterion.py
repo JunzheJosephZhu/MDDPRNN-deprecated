@@ -14,7 +14,7 @@ def stable_mean(tensor, dim, keepdim=False):
     return torch.sum(tensor/tensor.size(dim), dim=dim, keepdim=keepdim)
 
 
-def cal_loss(source, estimate_source, source_lengths, onoff_pred, debug=False, lamb=0.5, snr_only=False):
+def cal_loss(source, estimate_source, source_lengths, onoff_pred, debug=False, lamb=0.5):
     """
     Args:
         source: [B, C, T], B is batch size
@@ -24,12 +24,12 @@ def cal_loss(source, estimate_source, source_lengths, onoff_pred, debug=False, l
     B, max_C, _ = estimate_source.shape
     max_snr, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug)
     snrloss = 0 - torch.mean(max_snr)
-    if snr_only:
-        return snrloss, 1
-    else:
-        onoffloss = torch.nn.BCELoss()(onoff_pred, onoff_target)
-        acc = ((onoff_pred > 0.5) == (onoff_target > 0.5)).sum().float()/(B*max_C)
-        return snrloss + onoffloss * lamb, acc#, estimate_source, reorder_estimate_source
+    onoffloss = torch.nn.BCELoss()(onoff_pred, onoff_target)
+    print(snrloss, onoffloss)
+    acc = 0.0
+    for i in range(B):
+        acc += ((onoff_pred[i] > 0.5) == (onoff_target[i] > 0.5)).all().float()/(B*max_C)
+    return snrloss + onoffloss * lamb, snrloss, acc#, estimate_source, reorder_estimate_source
     #reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
 
 

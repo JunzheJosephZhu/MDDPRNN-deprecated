@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
     def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=10, half_lr=True,
-                early_stop=True, max_norm=5, lr=1e-3, momentum=0.0, l2=0.0, log_dir=None, comment=''):
+                early_stop=True, max_norm=5, lr=1e-3, momentum=0.0, l2=0.0, log_dir=None, comment='', lamb=0, decay_period=decay_period):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
@@ -23,6 +23,8 @@ class Solver(object):
         self.half_lr = half_lr
         self.early_stop = early_stop
         self.max_norm = max_norm
+        self.lamb = lamb
+        self.decay_period = decay_period
         # save and load model
         self.save_folder = save_folder
         self.checkpoint = checkpoint
@@ -109,7 +111,7 @@ class Solver(object):
                 #     lr=optim_state['param_groups'][0]['lr']))
                 # self.halving = False
                 pass
-            if epoch%2 == 1:
+            if epoch%self.decay_period == (self.decay_period-1):
                 optim_state = self.optimizer.state_dict()
                 optim_state['param_groups'][0]['lr'] = \
                     optim_state['param_groups'][0]['lr'] * 0.98
@@ -148,6 +150,7 @@ class Solver(object):
     def _run_one_epoch(self, epoch, cross_valid=False):
         start = time.time()
         total_loss = 0
+        total_snr = 0
         total_accuracy = 0
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
@@ -158,17 +161,21 @@ class Solver(object):
                 print('forward prop failed', padded_mixture.shape, e)
                 continue
             loss = []
+            snr = []
             accuracy = []
             for (estimate_source, onoff) in estimate_source_list:
-                step_loss, acc = \
-                        cal_loss(padded_source, estimate_source, mixture_lengths, onoff)
+                step_loss, step_snr, acc = \
+                        cal_loss(padded_source, estimate_source, mixture_lengths, onoff, lamb=self.lamb)
                 loss.append(step_loss)
+                snr.append(step_snr)
                 accuracy.append(acc)
             if not cross_valid: # training
                 loss = torch.stack(loss).mean()
+                snr = torch.stack(snr).mean()
                 accuracy = torch.stack(accuracy).mean()
             else:
                 loss = loss[-1] 
+                snr = snr[-1]
                 accuracy = accuracy[-1]
             try:
                 if not cross_valid:
@@ -181,13 +188,14 @@ class Solver(object):
                 print('backprop failed', padded_mixture.shape, e)
                 continue
             total_loss += loss.item()
+            total_snr += snr.item()
             total_accuracy += accuracy.item()
 
             if i % self.print_freq == 0:
                 print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-                      'Current Loss {3:.6f} | Average accuracy {4:.3f} | {5:.1f} ms/batch'.format(
+                      'Current Loss {3:.6f} | Average SNR {4: .3f} | Average accuracy {5:.3f} | {6:.1f} ms/batch'.format(
                           epoch + 1, i + 1, total_loss / (i + 1),
-                          loss.item(), total_accuracy / (i + 1), 
+                          loss.item(), total_snr / (i + 1), total_accuracy / (i + 1), 
                           1000 * (time.time() - start) / (i + 1)),
                       flush=True)
             

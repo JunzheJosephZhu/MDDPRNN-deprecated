@@ -168,25 +168,33 @@ class Dual_RNN_Block(nn.Module):
 
     def __init__(self, out_channels,
                  hidden_channels, rnn_type='LSTM', norm='ln',
-                 dropout=0, bidirectional=False, num_spks=2):
+                 dropout=0, bidirectional=False, num_spks=2, mulcat=(False, False)):
         super(Dual_RNN_Block, self).__init__()
         # RNN model
+        self.mul, self.cat = mulcat
         self.intra_rnn1 = getattr(nn, rnn_type)(
             out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
-        # self.intra_rnn2 = getattr(nn, rnn_type)(
-        #     out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
         self.inter_rnn1 = getattr(nn, rnn_type)(
             out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
-        # self.inter_rnn2 = getattr(nn, rnn_type)(
-        #     out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
+        if self.mul:
+            self.intra_rnn2 = getattr(nn, rnn_type)(
+                out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
+            self.inter_rnn2 = getattr(nn, rnn_type)(
+                out_channels, hidden_channels, 1, batch_first=True, dropout=dropout, bidirectional=bidirectional)
         # Norm
         self.intra_norm = select_norm(norm, out_channels, 4)
         self.inter_norm = select_norm(norm, out_channels, 4)
         # Linear
-        self.intra_linear = nn.Linear(
-            hidden_channels*2 + out_channels if bidirectional else hidden_channels + out_channels, out_channels)
-        self.inter_linear = nn.Linear(
-            hidden_channels*2 + out_channels if bidirectional else hidden_channels + out_channels, out_channels)
+        if self.cat:
+            self.intra_linear = nn.Linear(
+                hidden_channels*2 + out_channels if bidirectional else hidden_channels + out_channels, out_channels)
+            self.inter_linear = nn.Linear(
+                hidden_channels*2 + out_channels if bidirectional else hidden_channels + out_channels, out_channels)
+        else:
+            self.intra_linear = nn.Linear(
+                hidden_channels*2 if bidirectional else hidden_channels, out_channels)
+            self.inter_linear = nn.Linear(
+                hidden_channels*2 if bidirectional else hidden_channels, out_channels)
         
 
     def forward(self, x):
@@ -200,10 +208,14 @@ class Dual_RNN_Block(nn.Module):
         intra_rnn = x.permute(0, 3, 2, 1).contiguous().view(B*S, K, N)
         # [BS, K, H + N]
         self.intra_rnn1.flatten_parameters()
-        #self.intra_rnn2.flatten_parameters()
-        #intra_rnn = torch.cat([intra_rnn, self.intra_rnn1(intra_rnn)[0]*self.intra_rnn2(intra_rnn)[0]], dim=-1)
-        intra_rnn = torch.cat([intra_rnn, self.intra_rnn1(intra_rnn)[0]], dim=-1)
-
+        intra_mul = self.intra_rnn1(intra_rnn)[0]
+        if self.mul:
+            self.intra_rnn2.flatten_parameters()
+            intra_mul *= self.intra_rnn2(intra_rnn)[0]
+        if self.cat:
+            intra_rnn = torch.cat([intra_rnn, intra_mul], dim=-1)
+        else:
+            intra_rnn = intra_mul
         # [BS, K, N]
         intra_rnn = self.intra_linear(intra_rnn.contiguous().view(B*S*K, -1)).view(B*S, K, -1)
         # [B, S, K, N]
@@ -220,9 +232,14 @@ class Dual_RNN_Block(nn.Module):
         inter_rnn = intra_rnn.permute(0, 2, 3, 1).contiguous().view(B*K, S, N)
         # [BK, S, H + N]
         self.inter_rnn1.flatten_parameters()
-        #self.inter_rnn2.flatten_parameters()
-        #inter_rnn = torch.cat([inter_rnn, self.inter_rnn1(inter_rnn)[0]*self.inter_rnn2(inter_rnn)[0]], dim=-1)
-        inter_rnn = torch.cat([inter_rnn, self.inter_rnn1(inter_rnn)[0]], dim=-1)
+        inter_mul = self.inter_rnn1(inter_rnn)[0]
+        if self.mul:
+            self.inter_rnn2.flatten_parameters()
+            inter_mul *= self.inter_rnn2(inter_rnn)[0]
+        if self.cat:
+            inter_rnn = torch.cat([inter_rnn, inter_mul], dim=-1)
+        else:
+            inter_rnn = inter_mul
 
         # [BK, S, N]
         inter_rnn = self.inter_linear(inter_rnn.contiguous().view(B*S*K, -1)).view(B*K, S, -1)
@@ -256,7 +273,7 @@ class Dual_Path_RNN(nn.Module):
 
     def __init__(self, in_channels, out_channels, hidden_channels,
                  rnn_type='LSTM', norm='ln', dropout=0,
-                 bidirectional=False, num_layers=4, K=200, num_spks=2, multiloss=True):
+                 bidirectional=False, num_layers=4, K=200, num_spks=2, multiloss=True, mulcat=(False, False)):
         super(Dual_Path_RNN, self).__init__()
         self.K = K
         self.num_spks = num_spks
@@ -269,7 +286,7 @@ class Dual_Path_RNN(nn.Module):
         for i in range(num_layers):
             self.dual_rnn.append(Dual_RNN_Block(out_channels, hidden_channels,
                                      rnn_type=rnn_type, norm=norm, dropout=dropout,
-                                     bidirectional=bidirectional))
+                                     bidirectional=bidirectional, mulcat=mulcat))
 
         self.conv2d = nn.Conv2d(
             out_channels, out_channels*num_spks, kernel_size=1)
@@ -425,7 +442,7 @@ class Dual_RNN_model(nn.Module):
     '''
     def __init__(self, in_channels, out_channels, hidden_channels,
                  kernel_size=2, rnn_type='LSTM', norm='ln', dropout=0,
-                 bidirectional=False, num_layers=4, K=200, num_spks=5, multiloss=True):
+                 bidirectional=False, num_layers=4, K=200, num_spks=5, multiloss=True, mulcat=(False, False)):
         super(Dual_RNN_model,self).__init__()
         self.encoder = Encoder(kernel_size=kernel_size,out_channels=in_channels)
         self.separation = Dual_Path_RNN(in_channels, out_channels, hidden_channels,
