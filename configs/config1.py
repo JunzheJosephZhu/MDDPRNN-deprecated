@@ -5,7 +5,7 @@ comment = os.path.basename(__file__)
 lamb = 10
 maxlen = 4
 minlen = 2
-enc = 256 
+enc = 128
 bottleneck = 64 
 hidden = 128
 num_layers = 6
@@ -30,4 +30,5 @@ use_onoff = True # use on/off head or not; if off, use original
 multiloss = True # useless if use_onoff=False
 mul = False # useless if use_onoff=False
 cat = False # useless if use_onoff=False
+decay_period = 1
 decay_period = 1
