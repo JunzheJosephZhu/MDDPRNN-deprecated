@@ -1,8 +1,8 @@
 import time
 import sys
 import os
-comment = os.path.basename(__file__)
-lamb = 10
+config = os.path.basename(__file__).split('.')[0]
+lamb = 1
 maxlen = 4
 minlen = 2
 kernel_size = 2
@@ -23,10 +23,10 @@ momentum = 0.0
 l2 = 0.0 # weight decya
 save_folder = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/models"
 checkpoint = 1
-continue_from = save_folder+"/last.pth"
+continue_from = os.path.join(save_folder, "config2.pth")
 model_path = "best.pth"
 print_freq = 10
-comment += ''
+comment = config + 'just debugged accuracy, now 5 times bigger'
 log_dir = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/runs/"+time.strftime("%Y%m%d-%H%M%S")+comment
 use_onoff = True # use on/off head or not; if off, use original
 multiloss = True # useless if use_onoff=False

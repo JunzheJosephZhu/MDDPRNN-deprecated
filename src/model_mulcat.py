@@ -317,51 +317,55 @@ class Dual_Path_RNN(nn.Module):
         x = self.conv1d(x)
         # [B, N, K, S]
         x, gap = self._Segmentation(x, self.K)
-        outputs = []
+
+        xs = []
         for i in range(self.num_layers):
             x = self.dual_rnn[i](x)
-            # [B, N*spks, K, S]
-            if self.multiloss:
-                x1 = self.prelu(x)
-                x1 = self.conv2d(x1)
-                # [B*spks, N, K, S]
-                B, _, K, S = x1.shape
-                x1 = x1.view(B*self.num_spks,-1, K, S)
-                # [B*spks, N, L]
-                x1 = self._over_add(x1, gap)
-                x1 = self.output(x1)*self.output_gate(x1)
-                x2 = self.vad(x1).squeeze() # [B*spks]
-                # [spks*B, N, L]
-                x1 = self.end_conv1x1(x1)
-                # [B*spks, N, L] -> [B, spks, N, L]
-                _, N, L = x1.shape
-                x1 = x1.view(B, self.num_spks, N, L)
-                x1 = self.activation(x1)
-                x2 = x2.view(B, self.num_spks) # [B, spks]
-                # [spks, B, N, L]
-                x1 = x1.transpose(0, 1)
-                outputs.append((x1, x2))
-        if not self.multiloss:
-            x1 = self.prelu(x)
-            x1 = self.conv2d(x1)
-            # [B*spks, N, K, S]
-            B, _, K, S = x1.shape
-            x1 = x1.view(B*self.num_spks,-1, K, S)
-            # [B*spks, N, L]
-            x1 = self._over_add(x1, gap)
-            x1 = self.output(x1)*self.output_gate(x1)
-            x2 = self.vad(x1).squeeze() # [B*spks]
-            # [spks*B, N, L]
-            x1 = self.end_conv1x1(x1)
-            # [B*spks, N, L] -> [B, spks, N, L]
-            _, N, L = x1.shape
-            x1 = x1.view(B, self.num_spks, N, L)
-            x1 = self.activation(x1)
-            x2 = x2.view(B, self.num_spks) # [B, spks]
-            # [spks, B, N, L]
-            x1 = x1.transpose(0, 1)
-            outputs.append((x1, x2))
-        return outputs
+            xs.append(x)
+        B, N, K, S = x.size()
+        # [#stages*B, N, K, S]
+        if self.multiloss:
+            x = torch.stack(xs, dim=0).view(self.num_layers*B, N, K, S)
+        else:
+            x = xs[-1]
+        # x1: [#stages*B, spks, N, L]
+        # x2: [#stages*B, spks]
+        x1, x2 = self.transform_output(x, gap)
+        # x1: [#stages, B, spks, N, L]
+        # x2: [#stages, B, spks]
+        if self.multiloss:
+            x1 = x1.view(self.num_layers, B, *x1.shape[1:])
+            x2 = x2.view(self.num_layers, B, x2.shape[-1])
+        else:
+            x1 = x1.view(1, *x1.shape)
+            x2 = x2.view(1, *x2.shape)
+        return (x1, x2)
+
+    def transform_output(self, x, gap):
+        '''
+            args:
+                x: [B, N, K, S]
+            outputs:
+                x1: [B, spks, N, L]
+                x2: [B, spks]
+        '''
+        x1 = self.prelu(x)
+        x1 = self.conv2d(x1)
+        # [B*spks, N, K, S]
+        B, _, K, S = x1.shape
+        x1 = x1.view(B*self.num_spks,-1, K, S)
+        # [B*spks, N, L]
+        x1 = self._over_add(x1, gap)
+        x1 = self.output(x1)*self.output_gate(x1)
+        x2 = self.vad(x1).squeeze() # [B*spks]
+        # [spks*B, N, L]
+        x1 = self.end_conv1x1(x1)
+        # [B*spks, N, L] -> [B, spks, N, L]
+        _, N, L = x1.shape
+        x1 = x1.view(B, self.num_spks, N, L)
+        x1 = self.activation(x1)
+        x2 = x2.view(B, self.num_spks) # [B, spks]
+        return x1, x2
 
     def _padding(self, input, K):
         '''
@@ -457,22 +461,26 @@ class Dual_RNN_model(nn.Module):
         '''
         # [B, N, L]
         e = self.encoder(x)
-        # [spks, B, N, L]
-        s = self.separation(e)
-        # [B, N, L] -> [B, L]
-        spks, B, N, L = s[0][0].size()
-        e = e.unsqueeze(0) # [1, B, N, L]
-        outputs = []
-        # [B, N, L] -> [B, L]
-        #out = [s[i]*e for i in range(self.num_spks)] # [spks, B, N, L]
-        for (s1, s2) in s:
-            out = e*s1 # [spks, B, N, L]
-            out = out.view(spks*B, N, L) # [spks*B, N, L]
-            audio = self.decoder(out) # [spks*B, T]
-            audio = audio.view(spks, B, -1) # [spks, B, T]
-            audio = audio.transpose(0, 1) # [B, spks, T]
-            outputs.append((audio, s2))
-        return outputs
+        # s1: [#stages, B, spks, N, L]
+        # s2: [#stages, B, spks]
+        s1, s2 = self.separation(e)
+        stages, B, spks, N, L =s1.size()
+        # [1, B, N, L]
+        e = e.unsqueeze(0) 
+        # [#stages*spks, B, N, L]
+        s1 = s1.transpose(1, 2).contiguous().view(stages*spks, B, N, L)
+        # [#stages*spks, B, N, L]
+        out = e*s1
+        # [#stages*spks*B, N, L]
+        out = out.view(stages*spks*B, N, L)
+        # [#stages*spks*B, T]
+        audio = self.decoder(out)
+        # [#stages, spks, B, T]
+        audio = audio.view(stages, spks, B, -1)
+        # [#stages, B, spks, T]
+        audio = audio.transpose(1, 2)
+        return audio.transpose(0, 1), s2.transpose(0, 1)
+
         
     @staticmethod
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None, val_no_impv=None, random_state=None):

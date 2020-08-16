@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+import time
 
 EPS = 1e-8
 
@@ -14,7 +15,7 @@ def stable_mean(tensor, dim, keepdim=False):
     return torch.sum(tensor/tensor.size(dim), dim=dim, keepdim=keepdim)
 
 
-def cal_loss(source, estimate_source, source_lengths, onoff_pred, debug=False, lamb=0.5):
+def cal_loss(source, estimate_source, source_lengths, onoff_pred, debug=False, lamb=0.5, log_vars=False):
     """
     Args:
         source: [B, C, T], B is batch size
@@ -22,29 +23,25 @@ def cal_loss(source, estimate_source, source_lengths, onoff_pred, debug=False, l
         source_lengths: [B]
     """
     B, max_C, _ = estimate_source.shape
-    max_snr, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug)
+    max_snr, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug, log_vars)
     snrloss = 0 - torch.mean(max_snr)
     onoffloss = torch.nn.BCELoss()(onoff_pred, onoff_target)
-    print(snrloss, onoffloss)
     acc = 0.0
     for i in range(B):
-        acc += ((onoff_pred[i] > 0.5) == (onoff_target[i] > 0.5)).all().float()/(B*max_C)
+        acc += ((onoff_pred[i] > 0.5) == (onoff_target[i] > 0.5)).all().float()/B
     return snrloss + onoffloss * lamb, snrloss, acc#, estimate_source, reorder_estimate_source
     #reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
 
 
-def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug):
+def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug, log_vars):
     """Calculate SI-SNR with PIT training.
     Args:
         source: list of [B], each item is [C, T]
         estimate_source: [B, 5, T]
         source_lengths: [B], each item is between [0, T]
     """
-
-
     assert len(source) == len(estimate_source)
     assert source[0].size(1) == estimate_source.size(2)
-
     B, max_C, T = estimate_source.size()
 
     # mask padding position along T
@@ -53,7 +50,6 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug):
 
     max_snr = torch.zeros(B)
     onoff_target = torch.zeros(B, max_C)
-
     for batch_idx in range(B):
         # source[batch_idx]: [C, T]
         # estimate_source[batch_idx]: [5, T]
@@ -82,13 +78,12 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug):
         pair_wise_si_snr = stable_mean(pair_wise_proj ** 2, dim=2) / (stable_mean(e_noise ** 2, dim=2) + EPS)
         pair_wise_si_snr = 10 * torch.log10(pair_wise_si_snr + EPS)  # [B, C, C]
 
-
         if not debug:
-            # np.savetxt('log/pair_wise_si_snr.txt', pair_wise_si_snr.detach().cpu().numpy())
-            # np.save('log/source.npy', torch.stack(source).detach().cpu().numpy())
-            # np.save('log/estimate_source.npy', estimate_source.detach().cpu().numpy())
-            # np.save('log/source_lengths.npy', source_lengths.detach().cpu().numpy())
-            pass
+            if log_vars:
+                np.savetxt('log/pair_wise_si_snr.txt', pair_wise_si_snr.detach().cpu().numpy())
+                np.save('log/source.npy', [s.detach().cpu().numpy() for s in source])
+                np.save('log/estimate_source.npy', estimate_source.detach().cpu().numpy())
+                np.save('log/source_lengths.npy', source_lengths.detach().cpu().numpy())
         else:
             print('-'*100, '\nbatch_idx', batch_idx)
             print('source_len', source_lengths[batch_idx])
@@ -104,7 +99,6 @@ def cal_si_snr_with_pit(source, estimate_source, source_lengths, debug):
         row_idx, col_idx = linear_sum_assignment(-pair_wise_si_snr.detach().cpu())
         max_snr[batch_idx] = pair_wise_si_snr[row_idx, col_idx].mean()
         onoff_target[batch_idx][row_idx] = 1
-
     if debug:
         print('max_snr', max_snr)
     return max_snr, onoff_target.cuda()
@@ -180,10 +174,10 @@ if __name__ == "__main__":
         estimate_source = torch.Tensor(np.load('log_overflow_case3/estimate_source.npy'))
 
     elif testcase == 3: # ongoing
-        source = torch.Tensor(np.load('log/source.npy'))
+        source = [torch.Tensor(s) for s in np.load('log/source.npy', allow_pickle=True)]
         source_lengths = torch.Tensor(np.load('log/source_lengths.npy')).int()
         estimate_source = torch.Tensor(np.load('log/estimate_source.npy'))
 
-    loss, onoff_target = cal_loss(source, estimate_source, source_lengths, debug=True)
+    loss, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug=True)
     print('loss', loss)
     print('on/off target', onoff_target)

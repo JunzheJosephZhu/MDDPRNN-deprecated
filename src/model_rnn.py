@@ -403,7 +403,7 @@ class Dual_RNN_model(nn.Module):
         out = [s[i]*e for i in range(self.num_spks)]
         audio = [self.decoder(out[i]) for i in range(self.num_spks)]
         audio = torch.stack(audio, dim=1) # [B, spks, T]
-        return [(audio, torch.zeros((s.size(1), s.size(0))).cuda())]
+        return audio.unsqueeze(1), torch.zeros((s.size(1), 1, s.size(0))).cuda()
         
     @staticmethod
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None, val_no_impv=None, random_state=None):

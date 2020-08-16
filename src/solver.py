@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
     def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=10, half_lr=True,
-                early_stop=True, max_norm=5, lr=1e-3, momentum=0.0, l2=0.0, log_dir=None, comment='', lamb=0, decay_period=1):
+                early_stop=True, max_norm=5, lr=1e-3, momentum=0.0, l2=0.0, log_dir=None, comment='', lamb=0, decay_period=1, config='last'):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
@@ -30,6 +30,7 @@ class Solver(object):
         self.checkpoint = checkpoint
         self.continue_from = continue_from
         self.model_path = model_path
+        self.config = config
         # logging
         self.print_freq = print_freq
         # visualizing loss using visdom
@@ -72,7 +73,7 @@ class Solver(object):
             print("Training...")
             self.model.train()  # Turn on BatchNorm & Dropout
             start = time.time()
-            tr_avg_loss = self._run_one_epoch(epoch)
+            tr_avg_loss, tr_avg_snr, tr_avg_acc = self._run_one_epoch(epoch)
             print('-' * 85)
             print('Train Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Train Loss {2:.3f}'.format(
@@ -83,13 +84,15 @@ class Solver(object):
             # Cross validation
             print('Cross validation...')
             self.model.eval()  # Turn off Batchnorm & Dropout
-            val_loss = self._run_one_epoch(epoch, cross_valid=True)
+            val_loss, val_snr, val_acc = self._run_one_epoch(epoch, cross_valid=True)
             print('-' * 85)
             print('Valid Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Valid Loss {2:.3f}'.format(
                       epoch + 1, time.time() - start, val_loss))
             print('-' * 85)
-            self.writer.add_scalar('Loss/per epoch cv', val_loss, epoch)
+            self.writer.add_scalar('Loss/per_epoch_cv', val_loss, epoch)
+            self.writer.add_scalar('SNR/per_epoch_cv', val_snr, epoch)
+            self.writer.add_scalar('Accuracy/per_epoch_cv', val_acc, epoch)
 
             # Adjust learning rate (halving)
             if self.half_lr:
@@ -142,8 +145,8 @@ class Solver(object):
                 torch.save(package, file_path)
                 print('Saving checkpoint model to %s' % file_path)
 
-            # update last.pth
-            torch.save(package, os.path.join(self.save_folder, 'last.pth'))
+            # update config#.pth
+            torch.save(package, os.path.join(self.save_folder, self.config + '.pth'))
 
 
 
@@ -156,14 +159,21 @@ class Solver(object):
 
         for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
             try:
-                estimate_source_list = self.model(padded_mixture) ######################3
+                if not cross_valid:
+                    estimate_source_list, onoff_list = self.model(padded_mixture)
+                else:
+                    with torch.no_grad():
+                        estimate_source_list, onoff_list = self.model(padded_mixture)
             except Exception as e:
                 print('forward prop failed', padded_mixture.shape, e)
                 continue
+            # [#stages, B, ...]
+            estimate_source_list = estimate_source_list.transpose(0, 1)
+            onoff_list = onoff_list.transpose(0, 1)
             loss = []
             snr = []
             accuracy = []
-            for (estimate_source, onoff) in estimate_source_list:
+            for (estimate_source, onoff) in zip(estimate_source_list, onoff_list):
                 step_loss, step_snr, acc = \
                         cal_loss(padded_source, estimate_source, mixture_lengths, onoff, lamb=self.lamb)
                 loss.append(step_loss)
@@ -201,8 +211,12 @@ class Solver(object):
             
             if not cross_valid:
                 self.writer.add_scalar('Loss/train', loss.item(), epoch*len(data_loader)+i)
+                self.writer.add_scalar('SNR/train', snr.item(), epoch*len(data_loader)+i)
+                self.writer.add_scalar('Accuracy/train', accuracy.item(), epoch*len(data_loader)+i)
             else:
                 self.writer.add_scalar('Loss/cv', loss.item(), epoch*len(data_loader)+i)
+                self.writer.add_scalar('SNR/cv', snr.item(), epoch*len(data_loader)+i)
+                self.writer.add_scalar('Accuracy/cv', accuracy.item(), epoch*len(data_loader)+i)
 
 
-        return total_loss / (i + 1)
+        return total_loss / (i + 1), total_snr / (i + 1), total_accuracy / (i + 1)
