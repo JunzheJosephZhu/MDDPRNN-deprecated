@@ -178,6 +178,6 @@ if __name__ == "__main__":
         source_lengths = torch.Tensor(np.load('log/source_lengths.npy')).int()
         estimate_source = torch.Tensor(np.load('log/estimate_source.npy'))
 
-    loss, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug=True)
+    loss, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug=True, log_vars=False)
     print('loss', loss)
     print('on/off target', onoff_target)

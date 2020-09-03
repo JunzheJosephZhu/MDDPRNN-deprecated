@@ -9,7 +9,7 @@ import torch
 
 import numpy as np
 from solver import Solver
-from model_mulcat import Dual_RNN_model
+from model_rnn import Dual_RNN_model
 import time
 import random
 import os
@@ -17,10 +17,7 @@ import glob
 import torch.utils.data as data
 from data import load_json
 import torchaudio
-from pit_criterion import cal_loss, cal_si_snr_with_pit
-from duplicate_snr import duplicate_snr
-from tqdm import tqdm
-
+from pit_criterion import cal_loss
 torch.manual_seed(0)
 torch.backends.cudnn.benchmark=False
 torch.backends.cudnn.deterministic=True
@@ -29,25 +26,22 @@ root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/dataset"
 test_json = ["2spkr_json/tt",
             "3spkr_json/tt",
             "4spkr_json/tt",
-            "5spkr_json/tt"]
+            "5spkr_json/tt"][:1]
 
 sample_rate = 8000
-kernel_size = 8
-enc = 256
-bottleneck = 64 
-hidden = 128
-num_layers = 6
-K = 125
-num_spks = 5
-multiloss = True # useless if use_onoff=False
-mul = True # useless if use_onoff=False
-cat = True # useless if use_onoff=False
+maxlen = 4
+N = 64 
+L = 16 
+K = 100
+P = 50 
+H = 128 
+B = 6
+C = 2
 shuffle = False
 batch_size = 1
-model_path = "models/epoch107.pth.tar"
+model_path = "pretrained/pretrained.pth"
 print_freq = 10
 device = 0
-onoff_thres = 0.5
 
 def load(name, sr=8000):
     audio, sr = torchaudio.load(name)
@@ -97,41 +91,22 @@ class TestDataset(data.Dataset):
         sources = [load(sourcefile, sr=sr)[0][start:end] for sourcefile in sourcefiles]
         return mixture, sources
 
-
-
-
 if __name__ == '__main__':
     test_dataset = TestDataset(root, test_json)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=shuffle)
     # model
-    model = Dual_RNN_model(enc, bottleneck, hidden, kernel_size=kernel_size, bidirectional=True, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=(mul, cat)).cuda(device)
-    state_dict = torch.load(model_path, map_location=torch.device('cuda:'+str(device)))['state_dict']
+    model = Dual_RNN_model(256, 64, 128, bidirectional=True, num_layers=6, K=250).cuda(device)
+    state_dict = torch.load(model_path, map_location=torch.device('cuda:'+str(device)))['model_state_dict']
     model.load_state_dict(state_dict)
     print('epoch', torch.load(model_path, map_location=torch.device('cuda:'+str(device)))['epoch'])
     model.eval()
-    total_snr = 0.0
-    total_accuracy = 0.0
+    total_loss = []
     with torch.no_grad():
-        pbar = tqdm(test_loader)
-        for i, (mixture, sources) in enumerate(pbar):
+        for i, (mixture, sources) in enumerate(test_loader):
             ilens = torch.Tensor([mixture.shape[1]]).int()
-            # [B, T], [spks, T]
-            mixture, sources = mixture.cuda(device), torch.cat(sources, dim=0).cuda(device)
-            # [B, #stages, spks, T], [B, #stages, spks]
-            estimate_source_list, onoff_list = model(mixture)
-            # [spks, T], [spks]
-            estimate_source, onoff = estimate_source_list[0, -1], onoff_list[0, -1]
-            onoff = onoff > onoff_thres
-            variable_est = estimate_source[onoff]
-            sources = sources[:, :variable_est.shape[1]] # cut off extra samples
-            total_accuracy += variable_est.shape == sources.shape
-            if variable_est.shape >= sources.shape:
-                snr = cal_si_snr_with_pit(sources.unsqueeze(0), variable_est.unsqueeze(0), [sources.shape[1]], debug=False, log_vars=False)[0][0].item()
-                total_snr += snr
-            else:
-                snr = duplicate_snr(sources, variable_est)
-                total_snr += snr
-            pbar.set_description('total_snr %f, total_acc %f' % (total_snr / (i + 1), total_accuracy / (i + 1)))
-            # total_loss.append(loss.item())
-            # print(np.mean(total_loss))
+            mixture, sources = mixture.cuda(device), [torch.cat(sources, dim=0).cuda(device)]
+            estimate_source = model(mixture)
+            loss, _ = cal_loss(sources, estimate_source, ilens, debug=False)
+            total_loss.append(loss.item())
+            print(np.mean(total_loss))
         

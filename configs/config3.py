@@ -19,6 +19,7 @@ max_norm = 5
 shuffle = False
 batch_size = 12
 lr = 1e-3
+lr_override = False
 momentum = 0.0
 l2 = 0.0 # weight decya
 save_folder = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/models"
@@ -32,4 +33,4 @@ use_onoff = True # use on/off head or not; if off, use DPRNN
 multiloss = True # useless if use_onoff=False
 mul = True # useless if use_onoff=False
 cat = True # useless if use_onoff=False
-decay_period = 1
+decay_period = 2

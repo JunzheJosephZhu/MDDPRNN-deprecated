@@ -44,5 +44,6 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=l2)
     # solver
     solver = Solver(data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=print_freq,
-        half_lr=half_lr, early_stop=early_stop, max_norm=max_norm, lr=lr, momentum=momentum, l2=l2, log_dir=log_dir, comment=comment, lamb=lamb, decay_period=decay_period, config=config)
+        half_lr=half_lr, early_stop=early_stop, max_norm=max_norm, lr=lr, lr_override=lr_override, momentum=momentum, l2=l2, log_dir=log_dir, comment=comment, lamb=lamb, decay_period=decay_period, config=config)
     solver.train()
+    

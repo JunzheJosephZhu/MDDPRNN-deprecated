@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
     def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=10, half_lr=True,
-                early_stop=True, max_norm=5, lr=1e-3, momentum=0.0, l2=0.0, log_dir=None, comment='', lamb=0, decay_period=1, config='last'):
+                early_stop=True, max_norm=5, lr=1e-3, lr_override=False, momentum=0.0, l2=0.0, log_dir=None, comment='', lamb=0, decay_period=1, config='last'):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
@@ -40,6 +40,14 @@ class Solver(object):
         self._reset()
 
         self.writer = SummaryWriter(log_dir, comment=comment)
+        # learning rate override
+        if lr_override:
+            optim_state = self.optimizer.state_dict()
+            optim_state['param_groups'][0]['lr'] = lr
+            self.optimizer.load_state_dict(optim_state)
+            print('Learning rate adjusted to: {lr:.6f}'.format(
+                lr=optim_state['param_groups'][0]['lr']))
+
     def _reset(self):
         # Reset
         load = self.continue_from and os.path.exists(self.continue_from)
