@@ -14,6 +14,7 @@ import torch
 from data import MixtureDataset, _collate_fn
 from solver import Solver
 exec('from ' + args.config + ' import *')
+print('loading ' + args.config)
 torch.manual_seed(0)
 
 root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/dataset"
@@ -45,7 +46,8 @@ if __name__ == '__main__':
     cv_loader = torch.utils.data.DataLoader(cv_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
     # model
-    model = torch.nn.DataParallel(Dual_RNN_model(enc, bottleneck, hidden, kernel_size=kernel_size, rnn_type=rnn_type, norm=norm, dropout=dropout, bidirectional=True, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=(mul, cat)).cuda())
+    model = torch.nn.DataParallel(Dual_RNN_model(enc, bottleneck, hidden, kernel_size=kernel_size, rnn_type=rnn_type, norm=norm, dropout=dropout, bidirectional=True, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=(mul, cat)), device_ids=device_ids)
+    model = model.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=l2)
     # solver
     solver = Solver(data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=print_freq,
