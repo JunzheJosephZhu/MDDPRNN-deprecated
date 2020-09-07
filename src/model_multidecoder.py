@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch import nn
 import torch
 import warnings
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -57,7 +58,6 @@ class GlobalLayerNorm(nn.Module):
                 x = (x-mean)/torch.sqrt(var+self.eps)
         return x
 
-
 class CumulativeLayerNorm(nn.LayerNorm):
     '''
        Calculate Cumulative Layer Normalization
@@ -85,7 +85,6 @@ class CumulativeLayerNorm(nn.LayerNorm):
             # N x C x L
             x = torch.transpose(x, 1, 2)
         return x
-
 
 def select_norm(norm, dim, shape):
     if norm == 'gln':
@@ -123,34 +122,6 @@ class Encoder(nn.Module):
         x = self.conv1d(x)
         x = F.relu(x)
         return x
-
-
-class Decoder(nn.ConvTranspose1d):
-    '''
-        Decoder of the TasNet
-        This module can be seen as the gradient of Conv1d with respect to its input. 
-        It is also known as a fractionally-strided convolution 
-        or a deconvolution (although it is not an actual deconvolution operation).
-    '''
-
-    def __init__(self, *args, **kwargs):
-        super(Decoder, self).__init__(*args, **kwargs)
-
-    def forward(self, x):
-        """
-        x: [B, N, L]
-        """
-        if x.dim() not in [2, 3]:
-            raise RuntimeError("{} accept 3/4D tensor as input".format(
-                self.__name__))
-        x = super().forward(x if x.dim() == 3 else torch.unsqueeze(x, 1))
-
-        if torch.squeeze(x).dim() == 1:
-            x = torch.squeeze(x, dim=1)
-        else:
-            x = torch.squeeze(x)
-        return x
-
 
 class Dual_RNN_Block(nn.Module):
     '''
@@ -253,7 +224,6 @@ class Dual_RNN_Block(nn.Module):
 
         return out
 
-
 class Dual_Path_RNN(nn.Module):
     '''
        Implementation of the Dual-Path-RNN model
@@ -273,12 +243,10 @@ class Dual_Path_RNN(nn.Module):
 
     def __init__(self, in_channels, out_channels, hidden_channels,
                  rnn_type, norm, dropout,
-                 bidirectional, num_layers, K, num_spks, multiloss, mulcat):
+                 bidirectional, num_layers, K, mulcat):
         super(Dual_Path_RNN, self).__init__()
         self.K = K
-        self.num_spks = num_spks
         self.num_layers = num_layers
-        self.multiloss = multiloss
         self.norm = select_norm(norm, in_channels, 3)
         self.conv1d = nn.Conv1d(in_channels, out_channels, 1, bias=False)
 
@@ -287,25 +255,6 @@ class Dual_Path_RNN(nn.Module):
             self.dual_rnn.append(Dual_RNN_Block(out_channels, hidden_channels,
                                      rnn_type=rnn_type, norm=norm, dropout=dropout,
                                      bidirectional=bidirectional, mulcat=mulcat))
-
-        self.conv2d = nn.Conv2d(
-            out_channels, out_channels*num_spks, kernel_size=1)
-        self.end_conv1x1 = nn.Conv1d(out_channels, in_channels, 1, bias=False)
-        self.prelu = nn.PReLU()
-        self.activation = nn.ReLU()
-         # gated output layer
-        self.output = nn.Sequential(nn.Conv1d(out_channels, out_channels, 1),
-                                    nn.Tanh()
-                                    )
-        self.output_gate = nn.Sequential(nn.Conv1d(out_channels, out_channels, 1),
-                                         nn.Sigmoid()
-                                         )
-        self.vad = nn.Sequential(nn.Conv1d(out_channels, out_channels, 1),
-                                 nn.ReLU(),
-                                 nn.Conv1d(out_channels, 1, 1),
-                                 nn.Sigmoid(),
-                                 nn.AdaptiveAvgPool1d(1)
-                                 )
 
     def forward(self, x):
         '''
@@ -322,50 +271,26 @@ class Dual_Path_RNN(nn.Module):
         for i in range(self.num_layers):
             x = self.dual_rnn[i](x)
             xs.append(x)
-        B, N, K, S = x.size()
-        # [#stages*B, N, K, S]
-        if self.multiloss:
-            x = torch.stack(xs, dim=0).view(self.num_layers*B, N, K, S)
-        else:
-            x = xs[-1]
-        # x1: [#stages*B, spks, N, L]
-        # x2: [#stages*B, spks]
-        x1, x2 = self.transform_output(x, gap)
-        # x1: [#stages, B, spks, N, L]
-        # x2: [#stages, B, spks]
-        if self.multiloss:
-            x1 = x1.view(self.num_layers, B, *x1.shape[1:])
-            x2 = x2.view(self.num_layers, B, x2.shape[-1])
-        else:
-            x1 = x1.view(1, *x1.shape)
-            x2 = x2.view(1, *x2.shape)
-        return (x1, x2)
+        return xs, gap
 
-    def transform_output(self, x, gap):
+    def _Segmentation(self, input, K):
         '''
-            args:
-                x: [B, N, K, S]
-            outputs:
-                x1: [B, spks, N, L]
-                x2: [B, spks]
+           the segmentation stage splits
+           K: chunks of length
+           P: hop size
+           input: [B, N, L]
+           output: [B, N, K, S]
         '''
-        x1 = self.prelu(x)
-        x1 = self.conv2d(x1)
-        # [B*spks, N, K, S]
-        B, _, K, S = x1.shape
-        x1 = x1.view(B*self.num_spks,-1, K, S)
-        # [B*spks, N, L]
-        x1 = self._over_add(x1, gap)
-        x1 = self.output(x1)*self.output_gate(x1)
-        x2 = self.vad(x1).squeeze() # [B*spks]
-        # [spks*B, N, L]
-        x1 = self.end_conv1x1(x1)
-        # [B*spks, N, L] -> [B, spks, N, L]
-        _, N, L = x1.shape
-        x1 = x1.view(B, self.num_spks, N, L)
-        x1 = self.activation(x1)
-        x2 = x2.view(B, self.num_spks) # [B, spks]
-        return x1, x2
+        B, N, L = input.shape
+        P = K // 2
+        input, gap = self._padding(input, K)
+        # [B, N, K, S]
+        input1 = input[:, :, :-P].contiguous().view(B, N, -1, K)
+        input2 = input[:, :, P:].contiguous().view(B, N, -1, K)
+        input = torch.cat([input1, input2], dim=3).view(
+            B, N, -1, K).transpose(2, 3)
+
+        return input.contiguous(), gap
 
     def _padding(self, input, K):
         '''
@@ -386,24 +311,208 @@ class Dual_Path_RNN(nn.Module):
 
         return input, gap
 
-    def _Segmentation(self, input, K):
-        '''
-           the segmentation stage splits
-           K: chunks of length
-           P: hop size
-           input: [B, N, L]
-           output: [B, N, K, S]
-        '''
-        B, N, L = input.shape
-        P = K // 2
-        input, gap = self._padding(input, K)
-        # [B, N, K, S]
-        input1 = input[:, :, :-P].contiguous().view(B, N, -1, K)
-        input2 = input[:, :, P:].contiguous().view(B, N, -1, K)
-        input = torch.cat([input1, input2], dim=3).view(
-            B, N, -1, K).transpose(2, 3)
+class Decoder(nn.ConvTranspose1d):
+    '''
+        Decoder of the TasNet
+        This module can be seen as the gradient of Conv1d with respect to its input. 
+        It is also known as a fractionally-strided convolution 
+        or a deconvolution (although it is not an actual deconvolution operation).
+    '''
 
-        return input.contiguous(), gap
+    def __init__(self, *args, **kwargs):
+        super(Decoder, self).__init__(*args, **kwargs)
+
+    def forward(self, x):
+        """
+        x: [B, N, L]
+        """
+        if x.dim() not in [2, 3]:
+            raise RuntimeError("{} accept 3/4D tensor as input".format(
+                self.__name__))
+        x = super().forward(x if x.dim() == 3 else torch.unsqueeze(x, 1))
+
+        if torch.squeeze(x).dim() == 1:
+            x = torch.squeeze(x, dim=1)
+        else:
+            x = torch.squeeze(x)
+        return x
+
+class SingleDecoder(nn.Module):
+    def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, num_layers, num_spks):
+        super(SingleDecoder, self).__init__()
+        self.num_layers = num_layers
+        self.num_spks = num_spks
+        self.conv2d = nn.Conv2d(
+            out_channels, out_channels*num_spks, kernel_size=1)
+        self.end_conv1x1 = nn.Conv1d(out_channels, in_channels, 1, bias=False)
+        self.prelu = nn.PReLU()
+        self.activation = nn.ReLU()
+         # gated output layer
+        self.output = nn.Sequential(nn.Conv1d(out_channels, out_channels, 1),
+                                    nn.Tanh()
+                                    )
+        self.output_gate = nn.Sequential(nn.Conv1d(out_channels, out_channels, 1),
+                                         nn.Sigmoid()
+                                         )
+        self.decoder = Decoder(in_channels, out_channels=1, kernel_size=kernel_size, stride=kernel_size//2, bias=False)
+
+    def forward(self, x, e, gap, num_stages):
+        '''
+            args:
+                x: [#stages*B, N, K, S]
+                e: [B, N, L]
+            outputs:
+                x: [#stages*B, spks, T]
+        '''
+        print('start device %d decoder %d' % (torch.cuda.current_device(), self.num_spks-2))
+        x = self.prelu(x)
+        x = self.conv2d(x)
+        # [#stages*B*spks, N, K, S]
+        stagexB, _, K, S = x.shape
+        x = x.view(stagexB*self.num_spks,-1, K, S)
+        # [#stages*B*spks, N, L]
+        x = self._over_add(x, gap)
+        x = self.output(x)*self.output_gate(x)
+        # [#stages*B*spks, N, L]
+        x = self.end_conv1x1(x)
+        _, N, L = x.shape
+        # [#stages, B, spks, N, L]
+        x = x.view(num_stages, e.shape[0], self.num_spks, N, L)
+        x = self.activation(x)
+        # [1, B, 1, N, L]
+        e = e.unsqueeze(0).unsqueeze(2)
+        x *= e
+        # [#stages*B*spks, N, L]
+        x = x.view(stagexB*self.num_spks, N, L)
+        # [B, spks, T]
+        x = self.decoder(x).view(stagexB, self.num_spks, -1)
+        print('ended device %d decoder %d' % (torch.cuda.current_device(), self.num_spks-2))
+
+        return x
+
+    def _over_add(self, input, gap):
+        '''
+           Merge sequence
+           input: [B, N, K, S]
+           gap: padding length
+           output: [B, N, L]
+        '''
+        B, N, K, S = input.shape
+        P = K // 2
+        # [B, N, S, K]
+        input = input.transpose(2, 3).contiguous().view(B, N, -1, K * 2)
+
+        input1 = input[:, :, :, :K].contiguous().view(B, N, -1)[:, :, P:]
+        input2 = input[:, :, :, K:].contiguous().view(B, N, -1)[:, :, :-P]
+        input = input1 + input2
+        # [B, N, L]
+        if gap > 0:
+            input = input[:, :, :-gap]
+
+        return input
+
+class MultiDecoder(nn.Module):
+    def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, num_layers, max_spks, multiloss):
+        super(MultiDecoder, self).__init__()
+        self.multiloss = multiloss
+        self.num_layers = num_layers
+        self.max_spks = max_spks
+        self.num_spks = torch.arange(2, max_spks + 1)
+        self.num_decoders = len(self.num_spks)
+        self.conv2d = nn.Conv2d(out_channels, max_spks*out_channels*self.num_decoders, kernel_size=1)
+        self.end_conv1x1 = nn.Conv1d(out_channels*self.num_decoders, in_channels*self.num_decoders, 1, groups=self.num_decoders, bias=False)
+        self.prelu = nn.PReLU()
+        self.activation = nn.ReLU()
+         # gated output layer
+        self.output = nn.Sequential(nn.Conv1d(out_channels*self.num_decoders, out_channels*self.num_decoders, 1, groups=self.num_decoders),
+                                    nn.Tanh()
+                                    )
+        self.output_gate = nn.Sequential(nn.Conv1d(out_channels*self.num_decoders, out_channels*self.num_decoders, 1, groups=self.num_decoders),
+                                         nn.Sigmoid()
+                                         )
+        self.decoder = Decoder(in_channels*self.num_decoders, out_channels=1*self.num_decoders, kernel_size=kernel_size, stride=kernel_size//2, groups=self.num_decoders, bias=False)        
+        self.vad = nn.Sequential(nn.Conv2d(out_channels, in_channels, 1),
+                                 nn.AdaptiveAvgPool2d(1),
+                                 nn.ReLU(),
+                                 nn.Conv2d(in_channels, self.num_decoders, 1)
+                                 )
+
+    def forward(self, x, e, gap):
+        """
+        args:
+            x: list of num_layers, each being [B, N, K, S]
+            gap: gap in segmentation to be removed
+        returns:
+            signals: list of num_decoders, each [B, #stages, num_spks[i], T]
+            vad: [B, #stages, num_decoders]
+        """
+        B, N, K, S = x[0].size()
+        num_stages = self.num_layers if self.multiloss else 1
+        # [#stages*B, out_channels, K, S]
+        if self.multiloss:
+            x = torch.stack(x, dim=0).view(self.num_layers*B, N, K, S)
+        else:
+            x = x[-1]
+        # [#stages*B, num_decoders]
+        vad = self.vad(x).squeeze() # only logits
+        # [#stages, B, num_decoders]
+        vad = vad.view(num_stages, B, -1)
+        startt = time.time()
+
+        ''' old implementation
+            # list of num_decoders, each [#stages*B, spks, T]
+            x = [decoder(x, e, gap, num_stages) for decoder in self.decoderlist]
+            T = x[0].shape[-1]
+            # list of num_decoders, each [B, #stages, spks, T]
+            x = [signal.view(num_stages, B, -1, T).transpose(0, 1) for signal in x]
+        '''
+        # [B, #stages, max_spks, num_decoders, T]
+        x = self.decode(x, e, gap, num_stages)
+        signals = []
+        for decoder_id in range(self.num_decoders):
+            valid_spks = self.num_spks[decoder_id]
+            # [B, #stages, num_spks[i], T]
+            decoder_signal = x[:, :, :valid_spks, decoder_id, :]
+            signals.append(decoder_signal)
+
+        # print('device %d used %.3f' % (torch.cuda.current_device(), time.time()-startt))
+
+        return signals, vad.transpose(0, 1)
+
+    def decode(self, x, e, gap, num_stages):
+        '''
+            args:
+                x: [#stages*B, N, K, S]
+                e: [B, N, L]
+            outputs:
+                x: [B, #stages, max_spks, num_decoders, T]
+        '''
+        _, out_channels, K, S = x.size()
+        B, in_channels, L = e.size()
+        x = self.prelu(x)
+        # [#stages*B, max_spks*out_channels*num_decoders, K, S]
+        x = self.conv2d(x)
+        # [#stages*B*max_spks, N*num_decoders, K, S]
+        x = x.view(num_stages*B*self.max_spks, out_channels*self.num_decoders, K, S)
+        # [#stages*B*max_spks, N*num_decoders, L]
+        x = self._over_add(x, gap)
+        x = self.output(x)*self.output_gate(x)
+        # [#stages*B*max_spks, N*num_decoders, L]
+        x = self.end_conv1x1(x)
+        # [#stages, B, max_spks, N, num_decoders, L]
+        x = x.view(num_stages, B, self.max_spks, in_channels, self.num_decoders, L)
+        x = self.activation(x)
+        # [1, B, 1, N, 1, L]
+        e = e.unsqueeze(0).unsqueeze(2).unsqueeze(4)
+        x *= e
+        # [#stages*B*max_spks, N*num_decoders, L]
+        x = x.view(num_stages*B*self.max_spks, in_channels*self.num_decoders, L)
+        # [#stages*B*max_spks, num_decoders, T]
+        x = self.decoder(x)
+        # [#stages, B, max_spks, num_decoders, T]
+        x = x.view(num_stages, B, self.max_spks, self.num_decoders, -1)
+
+        return x.transpose(0, 1)
 
     def _over_add(self, input, gap):
         '''
@@ -451,9 +560,8 @@ class Dual_RNN_model(nn.Module):
         self.encoder = Encoder(kernel_size=kernel_size,out_channels=in_channels)
         self.separation = Dual_Path_RNN(in_channels, out_channels, hidden_channels,
                  rnn_type=rnn_type, norm=norm, dropout=dropout,
-                 bidirectional=bidirectional, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=mulcat)
-        self.decoder = Decoder(in_channels=in_channels, out_channels=1, kernel_size=kernel_size, stride=kernel_size//2, bias=False)
-        self.num_spks = num_spks
+                 bidirectional=bidirectional, num_layers=num_layers, K=K, mulcat=mulcat)
+        self.decoder = MultiDecoder(in_channels, out_channels, hidden_channels, kernel_size, num_layers, num_spks, multiloss)
     
     def forward(self, x):
         '''
@@ -461,27 +569,14 @@ class Dual_RNN_model(nn.Module):
         '''
         # [B, N, L]
         e = self.encoder(x)
-        # s1: [#stages, B, spks, N, L]
-        # s2: [#stages, B, spks]
-        s1, s2 = self.separation(e)
-        stages, B, spks, N, L =s1.size()
-        # [1, B, N, L]
-        e = e.unsqueeze(0) 
-        # [#stages*spks, B, N, L]
-        s1 = s1.transpose(1, 2).contiguous().view(stages*spks, B, N, L)
-        # [#stages*spks, B, N, L]
-        out = e*s1
-        # [#stages*spks*B, N, L]
-        out = out.view(stages*spks*B, N, L)
-        # [#stages*spks*B, T]
-        audio = self.decoder(out)
-        # [#stages, spks, B, T]
-        audio = audio.view(stages, spks, B, -1)
-        # [#stages, B, spks, T]
-        audio = audio.transpose(1, 2)
-        return audio.transpose(0, 1), s2.transpose(0, 1)
+        # list of #stages, [B, N, K, S]
+        s, gap = self.separation(e)
+        # signals: list of num_spks - 1, each [B, #stages, spks, T]
+        # vad: [B, #stages, num_spks - 1]
+        signals, vad = self.decoder(s, e, gap)
+            
+        return signals, vad
 
-        
     @staticmethod
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None, val_no_impv=None, random_state=None):
         package = {
@@ -500,10 +595,11 @@ class Dual_RNN_model(nn.Module):
 
 
 if __name__ == "__main__":
-    rnn = Dual_RNN_model(256, 64, 128,bidirectional=True, norm='ln', num_layers=6)
-    #encoder = Encoder(16, 512)
-    x = torch.ones(1, 100)
-    out = rnn(x)
+    rnn = torch.nn.DataParallel(Dual_RNN_model(256, 64, 128, kernel_size=8, rnn_type='LSTM', norm='ln', dropout=0.0, bidirectional=True, num_layers=6, K=125, num_spks=5, multiloss=True, mulcat=(True, True))).cuda()
+    x = torch.ones(4, 32000).cuda()
+    audio, vad = rnn(x)
+    print(len(audio), audio[1].shape)
+    print(vad.shape)
     def check_parameters(net):
         '''
             Returns module parameters. Mb
@@ -511,4 +607,3 @@ if __name__ == "__main__":
         parameters = sum(param.numel() for param in net.parameters())
         return parameters / 10**6
     print("{:.3f}".format(check_parameters(rnn)*1000000))
-    print(rnn)

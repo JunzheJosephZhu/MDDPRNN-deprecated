@@ -181,3 +181,7 @@ if __name__ == "__main__":
     loss, onoff_target = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug=True, log_vars=False)
     print('loss', loss)
     print('on/off target', onoff_target)
+    for i in range(100):
+        start = time.time()
+        a = torch.zeros(3, 5).cuda()
+        print(time.time() - start)

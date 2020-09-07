@@ -6,13 +6,12 @@ import time
 import numpy as np
 import torch
 
-from pit_criterion import cal_loss
 
 from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
-    def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=10, half_lr=True,
-                early_stop=True, max_norm=5, lr=1e-3, lr_override=False, momentum=0.0, l2=0.0, log_dir=None, comment='', lamb=0, decay_period=1, config='last'):
+    def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq, half_lr,
+                early_stop, max_norm, lr, lr_override, momentum, l2, log_dir, comment, lamb, decay_period, config, multidecoder):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
@@ -25,6 +24,12 @@ class Solver(object):
         self.max_norm = max_norm
         self.lamb = lamb
         self.decay_period = decay_period
+        self.multidecoder = multidecoder
+        if multidecoder:
+            from loss_multidecoder import cal_loss
+        else:
+            from loss_hungarian import cal_loss
+        self.loss_func = cal_loss
         # save and load model
         self.save_folder = save_folder
         self.checkpoint = checkpoint
@@ -168,25 +173,44 @@ class Solver(object):
         for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
             try:
                 if not cross_valid:
-                    estimate_source_list, onoff_list = self.model(padded_mixture)
+                    estimate_source_list, vad_list = self.model(padded_mixture)
                 else:
                     with torch.no_grad():
-                        estimate_source_list, onoff_list = self.model(padded_mixture)
+                        estimate_source_list, vad_list = self.model(padded_mixture)
             except Exception as e:
                 print('forward prop failed', padded_mixture.shape, e)
                 continue
-            # [#stages, B, ...]
-            estimate_source_list = estimate_source_list.transpose(0, 1)
-            onoff_list = onoff_list.transpose(0, 1)
-            loss = []
-            snr = []
-            accuracy = []
-            for (estimate_source, onoff) in zip(estimate_source_list, onoff_list):
-                step_loss, step_snr, acc = \
-                        cal_loss(padded_source, estimate_source, mixture_lengths, onoff, lamb=self.lamb)
-                loss.append(step_loss)
-                snr.append(step_snr)
-                accuracy.append(acc)
+            if not self.multidecoder:
+                # [#stages, B, ...]
+                estimate_source_list = estimate_source_list.transpose(0, 1)
+                vad_list = vad_list.transpose(0, 1)
+                loss = []
+                snr = []
+                accuracy = []
+                for (estimate_source, vad) in zip(estimate_source_list, vad_list):
+                    step_loss, step_snr, acc = \
+                            self.loss_func(padded_source, estimate_source, mixture_lengths, vad, lamb=self.lamb)
+                    loss.append(step_loss)
+                    snr.append(step_snr)
+                    accuracy.append(acc)
+            else:
+                # [B]
+                source_numbers = [len(source) for source in padded_source] # number of sources in each example
+                # list of B, each [#stages, spks, T]
+                estimate_sources = [estimate_source_list[source_numbers[b] - 2][b] for b in range(len(padded_source))] # only matched number outputs
+                loss = []
+                snr = []
+                accuracy = []
+                for stage in range(vad_list.size(1)):
+                    # list of B, each [spks, T]
+                    estimate_source = [source[stage] for source in estimate_sources]
+                    # [B, max_spks - 1]
+                    vad = vad_list[:, stage, :]
+                    step_loss, step_snr, acc = \
+                            self.loss_func(padded_source, estimate_source, mixture_lengths, vad, self.lamb)
+                    loss.append(step_loss)
+                    snr.append(step_snr)
+                    accuracy.append(acc)
             if not cross_valid: # training
                 loss = torch.stack(loss).mean()
                 snr = torch.stack(snr).mean()
