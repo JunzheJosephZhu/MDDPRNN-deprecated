@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
     def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq, half_lr,
-                early_stop, max_norm, lr, lr_override, momentum, l2, log_dir, comment, lamb, decay_period, config, multidecoder):
+                early_stop, max_norm, lr, lr_override, momentum, l2, log_dir, lamb, decay_period, config, multidecoder):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
@@ -44,7 +44,7 @@ class Solver(object):
 
         self._reset()
 
-        self.writer = SummaryWriter(log_dir, comment=comment)
+        self.writer = SummaryWriter(log_dir)
         # learning rate override
         if lr_override:
             optim_state = self.optimizer.state_dict()

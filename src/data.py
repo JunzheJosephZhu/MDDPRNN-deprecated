@@ -117,8 +117,9 @@ if __name__ == "__main__":
                 "4spkr_json/tt",
                 "5spkr_json/tt"]
     dataset = MixtureDataset(root, tr_json)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, collate_fn=_collate_fn)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=3, collate_fn=_collate_fn)
+    print(len(dataset))
     for mixtures, ilens, sources_list in tqdm(dataloader):
         start = time()
-        # print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
-        # print(time() - start)
+        print(mixtures.shape, ilens.shape, [len(sources) for sources in sources_list])
+        print(time() - start)

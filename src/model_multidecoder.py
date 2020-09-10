@@ -447,9 +447,9 @@ class MultiDecoder(nn.Module):
             vad: [B, #stages, num_decoders]
         """
         B, N, K, S = x[0].size()
-        num_stages = self.num_layers if self.multiloss else 1
+        num_stages = self.num_layers if self.multiloss and self.training else 1
         # [#stages*B, out_channels, K, S]
-        if self.multiloss:
+        if self.multiloss and self.training:
             x = torch.stack(x, dim=0).view(self.num_layers*B, N, K, S)
         else:
             x = x[-1]
@@ -457,7 +457,7 @@ class MultiDecoder(nn.Module):
         vad = self.vad(x).squeeze() # only logits
         # [#stages, B, num_decoders]
         vad = vad.view(num_stages, B, -1)
-        startt = time.time()
+        # startt = time.time()
 
         ''' old implementation
             # list of num_decoders, each [#stages*B, spks, T]
