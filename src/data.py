@@ -101,7 +101,50 @@ def _collate_fn(batch):
     ilens = torch.Tensor(np.stack(ilens)).int().cuda()
     return mixtures, ilens, sources_list
 
-
+class TestDataset(data.Dataset):
+    def __init__(self, root, json_folders, sr=8000): # segment and cv_maxlen not implemented
+        """
+        each line of textfile comes in the form of:
+            filename1, dB1, filename2, dB2, ...
+            args:
+                root: folder where dataset/ is located
+                json_folders: folders containing json files, **/dataset/#speakers/wav8k/min/tr/**
+                sr: sample rate
+                seglen: length of each segment in seconds
+                minlen: minimum segment length
+        """
+        self.sr = sr
+        self.mixes = []
+        for json_folder in json_folders:
+            mixfiles, wavlens = list(zip(*load_json(os.path.join(root, json_folder, 'mix.json')))) # list of 20000 filenames, and 20000 lengths
+            mixfiles = [os.path.join(root, mixfile.split('dataset/')[1]) for mixfile in mixfiles]
+            sig_json = [load_json(file) for file in sorted(glob.glob(os.path.join(root, json_folder, 's*.json')))] # list C, each have 20000 filenames
+            for i, spkr_json in enumerate(sig_json):
+                sig_json[i] = [os.path.join(root, line[0].split('dataset/')[1]) for line in spkr_json] # list C, each have 20000 filenames
+            siglists = list(zip(*sig_json)) # list of 20000, each have C filenames
+            self.mixes += list(zip(mixfiles, siglists, wavlens))
+        #printlist(self.mixes)
+        self.examples = []
+        for i, mix in enumerate(self.mixes):
+            self.examples.append({'mixfile': mix[0], 'sourcefiles': mix[1], 'start': 0, 'end': mix[2]})
+        random.seed(0)
+        self.examples = random.sample(self.examples, len(self.examples))
+    def __len__(self):
+        return len(self.examples)
+    def __getitem__(self, idx):
+        """
+        Returns:
+            mixture: [T]
+            sources: list of C, each [T]
+        """
+        example = self.examples[idx]
+        mixfile, sourcefiles, start, end = example['mixfile'], example['sourcefiles'], example['start'], example['end']
+        mixture, sr = load(mixfile, sr=self.sr)
+        assert sr == self.sr, 'need to resample'
+        mixture = mixture[start:end]
+        sources = [load(sourcefile, sr=sr)[0][start:end] for sourcefile in sourcefiles]
+        return mixture, sources
+        
 if __name__ == "__main__":
     root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/dataset"
     tr_json = ["2spkr_json/tr/",
