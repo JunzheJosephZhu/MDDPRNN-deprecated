@@ -171,6 +171,8 @@ class Solver(object):
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
         for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
+            padded_mixture = padded_mixture.cuda()
+            padded_source = [tmp_ps.cuda() for tmp_ps in padded_source]
             try:
                 if not cross_valid:
                     estimate_source_list, vad_list = self.model(padded_mixture)
@@ -193,7 +195,7 @@ class Solver(object):
                     loss.append(step_loss)
                     snr.append(step_snr)
                     accuracy.append(acc)
-            else:
+            else: # if using multidecoder
                 # [B]
                 source_numbers = [len(source) for source in padded_source] # number of sources in each example
                 # list of B, each [#stages, spks, T]

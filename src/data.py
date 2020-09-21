@@ -17,10 +17,6 @@ def load_json(filename):
         data = json.load(f)
     return data
 
-def printlist(filelist, length=100):
-    for i in range(length):
-        print(filelist[i])
-
 def pad_audio(audio, len_samples=4*8000):
     if len(audio) < len_samples:
         audio = np.concatenate([audio, np.zeros(len_samples - len(audio))])
@@ -38,8 +34,8 @@ class MixtureDataset(data.Dataset):
                 seglen: length of each segment in seconds
                 minlen: minimum segment length
         """
-        seglen = int(seglen*sr)
-        minlen = int(minlen*sr)
+        seglen = int(seglen * sr)
+        minlen = int(minlen * sr)
         self.sr = sr
         self.mixes = []
         for json_folder in json_folders:
@@ -62,6 +58,14 @@ class MixtureDataset(data.Dataset):
                 start += minlen
         random.seed(0)
         self.examples = random.sample(self.examples, len(self.examples))
+
+        # Count.
+        example_source_files_len = [len(tmp['sourcefiles'] )for tmp in self.examples]
+        unique, counts = np.unique(np.array(example_source_files_len), return_counts=True)
+        self.example_weights =[]
+        for tmp in example_source_files_len:
+            self.example_weights.append(1./counts[tmp-2])
+        self.example_weights = torch.Tensor(self.example_weights)
     def __len__(self):
         return len(self.examples)
     def __getitem__(self, idx):
@@ -95,10 +99,10 @@ def _collate_fn(batch):
         assert len(mixture) <= 32000
         ilens.append(len(mixture))
         mixtures.append(pad_audio(mixture))
-        sources = torch.Tensor(np.stack([pad_audio(source) for source in sources], axis=0)).float().cuda()
+        sources = torch.Tensor(np.stack([pad_audio(source) for source in sources], axis=0)).float()
         sources_list.append(sources)
-    mixtures = torch.Tensor(np.stack(mixtures, axis=0)).float().cuda()
-    ilens = torch.Tensor(np.stack(ilens)).int().cuda()
+    mixtures = torch.Tensor(np.stack(mixtures, axis=0)).float()
+    ilens = torch.Tensor(np.stack(ilens)).int()
     return mixtures, ilens, sources_list
 
 class TestDataset(data.Dataset):

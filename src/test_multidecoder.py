@@ -8,7 +8,6 @@ sys.path.append("configs")
 import argparse
 
 import torch
-
 import numpy as np
 from solver import Solver
 from model_multidecoder import Dual_RNN_model

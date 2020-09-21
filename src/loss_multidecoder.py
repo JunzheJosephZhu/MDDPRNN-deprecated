@@ -24,9 +24,8 @@ def cal_loss(source, estimate_source, source_lengths, vad, lamb, debug=False, lo
         vad: [B, max_spks - 1]
     """
     # [B]
-    vad_target = torch.Tensor([len(s) for s in source]).long()
+    vad_target = torch.Tensor([len(s) for s in source]).long().to(vad.get_device())
     vad_target -= 2 # start from 0
-    vad_target = vad_target.cuda() if vad.is_cuda else vad_target 
     max_snr = cal_si_snr_with_pit(source, estimate_source, source_lengths, debug, log_vars)
     snrloss = 0 - torch.mean(max_snr)
     vadloss = torch.nn.CrossEntropyLoss()(vad, vad_target)

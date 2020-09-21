@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser(description='config file')
 parser.add_argument('--config', type=str, default='config4', help='config file')
 args = parser.parse_args()
 import torch
-
+from torch.utils.data import WeightedRandomSampler
 from data import MixtureDataset, _collate_fn
 from solver import Solver
 exec('from ' + args.config + ' import *')
@@ -42,8 +42,14 @@ else:
 if __name__ == '__main__':
     tr_dataset = MixtureDataset(root, tr_json, seglen=maxlen, minlen=minlen)
     cv_dataset = MixtureDataset(root, val_json, seglen=maxlen, minlen=minlen)
-    tr_loader = torch.utils.data.DataLoader(tr_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
-    cv_loader = torch.utils.data.DataLoader(cv_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle)
+    samples_weights = tr_dataset.example_weights
+    sampler = WeightedRandomSampler(weights=samples_weights,
+                                    num_samples=len(samples_weights),
+                                    replacement=True)
+    tr_loader = torch.utils.data.DataLoader(tr_dataset, batch_size=batch_size, collate_fn=_collate_fn,
+                                            sampler=sampler,
+				                            shuffle=shuffle, num_workers=8)
+    cv_loader = torch.utils.data.DataLoader(cv_dataset, batch_size=batch_size, collate_fn=_collate_fn, shuffle=shuffle, num_workers=8)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
     # model
     model = torch.nn.DataParallel(Dual_RNN_model(enc, bottleneck, hidden, kernel_size=kernel_size, rnn_type=rnn_type, norm=norm, dropout=dropout, bidirectional=True, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=(mul, cat)), device_ids=device_ids)
@@ -53,4 +59,3 @@ if __name__ == '__main__':
     solver = Solver(data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq=print_freq,
         half_lr=half_lr, early_stop=early_stop, max_norm=max_norm, lr=lr, lr_override=lr_override, momentum=momentum, l2=l2, log_dir=log_dir, lamb=lamb, decay_period=decay_period, config=config, multidecoder=multidecoder)
     solver.train()
-    

@@ -3,6 +3,10 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 def duplicate_snr(sources, variable_est):
+    '''
+        sources: [spks, T]
+        variable_est: [spks, T]
+    '''
     EPS = 1e-8
     assert sources.shape[0] > variable_est.shape[0]
     zero_mean_target = sources - torch.mean(sources, dim=1, keepdim=True)
