@@ -31,7 +31,7 @@ checkpoint = 1
 continue_from = os.path.join(save_folder, "config4.pth") # if not exist, randomly initialize
 model_path = config + "_best.pth" # best model save path
 print_freq = 10
-comment = ' multiple decoder with the same TCN. Random Initialization'
+comment = ' weighted chunk resampling'
 log_dir = os.path.join(root, 'runs', time.strftime("%Y%m%d-%H%M%S") + config + comment)
 use_onoff = True # hungarian model if on, DPRNN if off. useless if multidecoder=True
 multiloss = True
