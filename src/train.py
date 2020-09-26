@@ -3,8 +3,8 @@
 # Created on 2018/12
 # Author: Junzhe Zhu & Kaituo XU
 import sys
-sys.path.append("/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model")
-sys.path.append("/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/configs")
+root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model"
+sys.path.append(root)
 import argparse
 parser = argparse.ArgumentParser(description='config file')
 parser.add_argument('--config', type=str, default='config4', help='config file')
@@ -13,11 +13,11 @@ import torch
 from torch.utils.data import WeightedRandomSampler
 from data import MixtureDataset, _collate_fn
 from solver import Solver
-exec('from ' + args.config + ' import *')
+exec('from configs.' + args.config + ' import *')
 print('loading ' + args.config)
 torch.manual_seed(0)
 
-root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/dataset"
+root_dataset = os.path.join(root, "dataset")
 tr_json = ["2spkr_json/tr/",
             "3spkr_json/tr/",
             "4spkr_json/tr/",
@@ -40,8 +40,8 @@ else:
 
 
 if __name__ == '__main__':
-    tr_dataset = MixtureDataset(root, tr_json, seglen=maxlen, minlen=minlen)
-    cv_dataset = MixtureDataset(root, val_json, seglen=maxlen, minlen=minlen)
+    tr_dataset = MixtureDataset(root_dataset, tr_json, seglen=maxlen, minlen=minlen)
+    cv_dataset = MixtureDataset(root_dataset, val_json, seglen=maxlen, minlen=minlen)
     samples_weights = tr_dataset.example_weights
     sampler = WeightedRandomSampler(weights=samples_weights,
                                     num_samples=len(samples_weights),

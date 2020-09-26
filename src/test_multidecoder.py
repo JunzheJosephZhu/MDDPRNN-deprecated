@@ -20,7 +20,7 @@ from data import TestDataset
 from loss_multidecoder import cal_loss, cal_si_snr_with_pit
 from duplicate_snr import duplicate_snr
 from tqdm import tqdm
-from config4 import kernel_size, enc, bottleneck, hidden, num_layers, K, num_spks, multiloss, mul, cat, shuffle, norm, rnn_type, dropout, maxlen, minlen
+from config6 import kernel_size, enc, bottleneck, hidden, num_layers, K, num_spks, multiloss, mul, cat, shuffle, norm, rnn_type, dropout, maxlen, minlen
 torch.manual_seed(0)
 torch.backends.cudnn.benchmark=False
 torch.backends.cudnn.deterministic=True
@@ -32,7 +32,7 @@ test_json = ["2spkr_json/cv",
             "5spkr_json/cv"]
 
 batch_size = 1
-model_path = "models/config4_best.pth"
+model_path = "pretrained/raymond_pretrained_expanded.pth"
 device = 3
 # chop settings
 sr = 8000
@@ -89,7 +89,7 @@ if __name__ == '__main__':
                 votes[vad_chunk] += 1
             vad_voted = np.argmax(votes, axis=0)
             accuracy_voted += vad_voted == sources.shape[0] - 2
-            print(accuracy_whole/(i + 1), accuracy_voted/(i + 1)) #####################
+            # print(accuracy_whole/(i + 1), accuracy_voted/(i + 1)) #####################
             # [spks, T]
             estimate_source = estimate_source_list[vad_voted][0][-1]
             sources = sources[:, :estimate_source.shape[1]] # cut off extra samples
