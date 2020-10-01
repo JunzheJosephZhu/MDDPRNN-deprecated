@@ -26,11 +26,12 @@ for name, param in old_dict.items():
     if name not in new_dict:
         name = name[len("decoder"):]
         print(name, param.shape)
+        '''
         if not name.startswith(".prelu"):
-            if name.startswith('.conv2d'):
-                chunks = param.view(4, -1, *param.size()[1:])
-            else:
+            if name.startswith('.end'):
                 chunks = param.view(-1, 4, *param.size()[1:]).transpose(0, 1)
+            else:
+                chunks = param.view(4, -1, *param.size()[1:])
         for i in range(4):
             mapped_name = "decoder.decoders." + str(i) + name
             check_mapping[mapped_name] = 1
@@ -46,6 +47,8 @@ for name, param in old_dict.items():
             else:
                 assert chunks[i].shape == new_dict[mapped_name].shape
                 new_dict[mapped_name] = chunks[i]
+        '''
+        print("I'm not sure how to fix this... or if it can be fixed at all.")
     else:
         new_dict[name] = param
         check_mapping[name] = 1
