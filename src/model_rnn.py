@@ -391,7 +391,7 @@ class Dual_RNN_model(nn.Module):
         self.decoder = Decoder(in_channels=in_channels, out_channels=1, kernel_size=kernel_size, stride=kernel_size//2, bias=False)
         self.num_spks = num_spks
     
-    def forward(self, x):
+    def forward(self, x, dummy1, dummy2):
         '''
            x: [B, L]
         '''

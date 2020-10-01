@@ -111,29 +111,20 @@ class Solver(object):
             if self.half_lr:
                 if val_loss >= self.prev_val_loss:
                     self.val_no_impv += 1
-                    if self.val_no_impv >= 2: # 3 is too much
-                        self.halving = True
                     if self.val_no_impv >= 10 and self.early_stop:
                         print("No improvement for 10 epochs, early stopping.")
                         break
                 else:
                     self.val_no_impv = 0
-            if self.halving:
-                # optim_state = self.optimizer.state_dict()
-                # optim_state['param_groups'][0]['lr'] = \
-                #     optim_state['param_groups'][0]['lr'] / 2.0
-                # self.optimizer.load_state_dict(optim_state)
-                # print('Learning rate adjusted to: {lr:.6f}'.format(
-                #     lr=optim_state['param_groups'][0]['lr']))
-                # self.halving = False
-                pass
-            if epoch%self.decay_period == (self.decay_period-1):
+
+            if epoch % self.decay_period == (self.decay_period-1):
                 optim_state = self.optimizer.state_dict()
                 optim_state['param_groups'][0]['lr'] = \
                     optim_state['param_groups'][0]['lr'] * 0.98
                 self.optimizer.load_state_dict(optim_state)
                 print('Learning rate adjusted to: {lr:.6f}'.format(
                     lr=optim_state['param_groups'][0]['lr']))
+                    
             self.prev_val_loss = val_loss
 
             # Save the best model
@@ -169,16 +160,19 @@ class Solver(object):
         total_snr = 0
         total_accuracy = 0
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
+        current_device = next(self.model.module.parameters()).device
 
         for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
-            padded_mixture = padded_mixture.cuda()
-            padded_source = [tmp_ps.cuda() for tmp_ps in padded_source]
+            B = len(padded_source)
+            padded_mixture = padded_mixture.cuda(current_device)
+            padded_source = [tmp_ps.cuda(current_device) for tmp_ps in padded_source]
+            num_sources = torch.Tensor([tmps_ps.size(0) for tmps_ps in padded_source]).long()
             try:
                 if not cross_valid:
-                    estimate_source_list, vad_list = self.model(padded_mixture)
+                    estimate_source_list, vad_list = self.model(padded_mixture, num_sources, True)
                 else:
                     with torch.no_grad():
-                        estimate_source_list, vad_list = self.model(padded_mixture)
+                        estimate_source_list, vad_list = self.model(padded_mixture, num_sources, True)
             except Exception as e:
                 print('forward prop failed', padded_mixture.shape, e)
                 continue
@@ -195,28 +189,32 @@ class Solver(object):
                     loss.append(step_loss)
                     snr.append(step_snr)
                     accuracy.append(acc)
+                loss = torch.stack(loss)
+                snr = torch.stack(snr)
+                accuracy = torch.stack(accuracy)
             else: # if using multidecoder
-                # [B]
-                source_numbers = [len(source) for source in padded_source] # number of sources in each example
-                # list of B, each [#stages, spks, T]
-                estimate_sources = [estimate_source_list[source_numbers[b] - 2][b] for b in range(len(padded_source))] # only matched number outputs
+                # list of B, each [num_stages, spks, T]
+                estimate_sources = [estimate_source_list[i, :, :num_sources[i], :] for i in range(B)]
                 loss = []
                 snr = []
                 accuracy = []
-                for stage in range(vad_list.size(1)):
-                    # list of B, each [spks, T]
-                    estimate_source = [source[stage] for source in estimate_sources]
-                    # [B, max_spks - 1]
-                    vad = vad_list[:, stage, :]
+                for idx in range(B):
+                    # list of [num_stages, spks, T]
+                    # [num_stages, num_decoders]
+                    vad = vad_list[idx]
                     step_loss, step_snr, acc = \
-                            self.loss_func(padded_source, estimate_source, mixture_lengths, vad, self.lamb)
+                            self.loss_func(padded_source[idx], estimate_sources[idx], mixture_lengths[idx], vad, self.lamb)
+                    # [num_stages]
                     loss.append(step_loss)
                     snr.append(step_snr)
                     accuracy.append(acc)
+                loss = torch.stack(loss, dim=0).mean(dim=0)
+                snr = torch.stack(snr, dim=0).mean(dim=0)
+                accuracy = torch.stack(accuracy, dim=0).mean(dim=0)
             if not cross_valid: # training
-                loss = torch.stack(loss).mean()
-                snr = torch.stack(snr).mean()
-                accuracy = torch.stack(accuracy).mean()
+                loss = loss.mean()
+                snr = snr.mean()
+                accuracy = accuracy.mean()
             else:
                 loss = loss[-1] 
                 snr = snr[-1]
@@ -234,7 +232,6 @@ class Solver(object):
             total_loss += loss.item()
             total_snr += snr.item()
             total_accuracy += accuracy.item()
-
             if i % self.print_freq == 0:
                 print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
                       'Current Loss {3:.6f} | Average SNR {4: .3f} | Average accuracy {5:.3f} | {6:.1f} ms/batch'.format(

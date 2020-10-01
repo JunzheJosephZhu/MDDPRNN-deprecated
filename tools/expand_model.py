@@ -15,14 +15,14 @@ big_pth_path = 'pretrained/raymond_pretrained_expanded.pth'
 small_pth_path = os.path.join(root, small_pth_path)
 big_pth_path = os.path.join(root, big_pth_path)
 small_pth = torch.load(small_pth_path)
+old_lr = small_pth['optim_dict']['param_groups'][0]['lr']
 model = Dual_RNN_model(enc, bottleneck, hidden, kernel_size=kernel_size, rnn_type=rnn_type, norm=norm, dropout=dropout, bidirectional=True, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=(mul, cat))
-optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=l2)
+optimizer = torch.optim.Adam(model.parameters(), lr=old_lr, weight_decay=l2)
 
 old_dict = small_pth['state_dict']
 new_dict = model.state_dict()
 for ((name1, param1), (name2, param2)) in zip(old_dict.items(), new_dict.items()):
     assert name1 == name2
-    # print(name1, param1.size(), param2.size())
     if fill_zeros:
         param2.fill_(0.0000000)
     if param1.shape != param2.shape:

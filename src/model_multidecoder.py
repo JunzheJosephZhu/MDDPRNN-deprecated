@@ -338,12 +338,12 @@ class Decoder(nn.ConvTranspose1d):
         return x
 
 class SingleDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, num_layers, num_spks):
+    def __init__(self, in_channels, out_channels, hidden_channels, kernel_size, num_spks):
         super(SingleDecoder, self).__init__()
-        self.num_layers = num_layers
+        self.out_channels = out_channels
         self.num_spks = num_spks
         self.conv2d = nn.Conv2d(
-            out_channels, out_channels*num_spks, kernel_size=1)
+            out_channels, out_channels * num_spks, kernel_size=1)
         self.end_conv1x1 = nn.Conv1d(out_channels, in_channels, 1, bias=False)
         self.prelu = nn.PReLU()
         self.activation = nn.ReLU()
@@ -356,37 +356,36 @@ class SingleDecoder(nn.Module):
                                          )
         self.decoder = Decoder(in_channels, out_channels=1, kernel_size=kernel_size, stride=kernel_size//2, bias=False)
 
-    def forward(self, x, e, gap, num_stages):
+    def forward(self, x, e, gap):
         '''
             args:
-                x: [#stages*B, N, K, S]
-                e: [B, N, L]
+                x: [num_stages, out_channels, K, S]
+                e: [in_channels, L]
             outputs:
-                x: [#stages*B, spks, T]
+                x: [num_stages, num_spks, T]
         '''
-        print('start device %d decoder %d' % (torch.cuda.current_device(), self.num_spks-2))
         x = self.prelu(x)
+        # [num_stages, num_spks * out_channels, K, S]
         x = self.conv2d(x)
-        # [#stages*B*spks, N, K, S]
-        stagexB, _, K, S = x.shape
-        x = x.view(stagexB*self.num_spks,-1, K, S)
-        # [#stages*B*spks, N, L]
+        num_stages, _, K, S = x.shape
+        # [num_stages * num_spks, out_channels, K, S]
+        x = x.view(num_stages * self.num_spks, self.out_channels, K, S)
+        # [num_stages * num_spks, out_channels, L]
         x = self._over_add(x, gap)
-        x = self.output(x)*self.output_gate(x)
-        # [#stages*B*spks, N, L]
+        x = self.output(x) * self.output_gate(x)
+        # [num_stages * num_spks, in_channels, L]
         x = self.end_conv1x1(x)
         _, N, L = x.shape
-        # [#stages, B, spks, N, L]
-        x = x.view(num_stages, e.shape[0], self.num_spks, N, L)
+        # [num_stages, num_spks, in_channels, L]
+        x = x.view(num_stages, self.num_spks, N, L)
         x = self.activation(x)
-        # [1, B, 1, N, L]
-        e = e.unsqueeze(0).unsqueeze(2)
-        x *= e
-        # [#stages*B*spks, N, L]
-        x = x.view(stagexB*self.num_spks, N, L)
-        # [B, spks, T]
-        x = self.decoder(x).view(stagexB, self.num_spks, -1)
-        print('ended device %d decoder %d' % (torch.cuda.current_device(), self.num_spks-2))
+        # [1, 1, in_channels, L]
+        e = e.unsqueeze(0).unsqueeze(1)
+        x = x * e
+        # [num_stages * num_spks, N, L]
+        x = x.view(num_stages * self.num_spks, N, L)
+        # [num_stages, num_spks, T]
+        x = self.decoder(x).view(num_stages, self.num_spks, -1)
 
         return x
 
@@ -419,121 +418,142 @@ class MultiDecoder(nn.Module):
         self.max_spks = max_spks
         self.num_spks = torch.arange(2, max_spks + 1)
         self.num_decoders = len(self.num_spks)
-        self.conv2d = nn.Conv2d(out_channels, max_spks*out_channels*self.num_decoders, kernel_size=1)
-        self.end_conv1x1 = nn.Conv1d(out_channels*self.num_decoders, in_channels*self.num_decoders, 1, groups=self.num_decoders, bias=False)
-        self.prelu = nn.PReLU()
-        self.activation = nn.ReLU()
-         # gated output layer
-        self.output = nn.Sequential(nn.Conv1d(out_channels*self.num_decoders, out_channels*self.num_decoders, 1, groups=self.num_decoders),
-                                    nn.Tanh()
-                                    )
-        self.output_gate = nn.Sequential(nn.Conv1d(out_channels*self.num_decoders, out_channels*self.num_decoders, 1, groups=self.num_decoders),
-                                         nn.Sigmoid()
-                                         )
-        self.decoder = Decoder(in_channels*self.num_decoders, out_channels=1*self.num_decoders, kernel_size=kernel_size, stride=kernel_size//2, groups=self.num_decoders, bias=False)        
+        self.decoders = nn.ModuleList()
+        for num_spks in range(2, max_spks + 1):
+            self.decoders.append(SingleDecoder(in_channels, out_channels, hidden_channels, kernel_size, num_spks))
+        '''
+            self.conv2d = nn.Conv2d(out_channels, max_spks*out_channels*self.num_decoders, kernel_size=1)
+            self.end_conv1x1 = nn.Conv1d(out_channels*self.num_decoders, in_channels*self.num_decoders, 1, groups=self.num_decoders, bias=False)
+                    self.prelu = nn.PReLU()
+            self.activation = nn.ReLU()
+            # gated output layer
+            self.output = nn.Sequential(nn.Conv1d(out_channels*self.num_decoders, out_channels*self.num_decoders, 1, groups=self.num_decoders),
+                                        nn.Tanh()
+                                        )
+            self.output_gate = nn.Sequential(nn.Conv1d(out_channels*self.num_decoders, out_channels*self.num_decoders, 1, groups=self.num_decoders),
+                                            nn.Sigmoid()
+                                            )
+            self.decoder = Decoder(in_channels*self.num_decoders, out_channels=1*self.num_decoders, kernel_size=kernel_size, stride=kernel_size//2, groups=self.num_decoders, bias=False)        
+        '''
         self.vad = nn.Sequential(nn.Conv2d(out_channels, in_channels, 1),
-                                 nn.AdaptiveAvgPool2d(1),
-                                 nn.ReLU(),
-                                 nn.Conv2d(in_channels, self.num_decoders, 1)
-                                 )
+                                nn.AdaptiveAvgPool2d(1),
+                                nn.ReLU(),
+                                nn.Conv2d(in_channels, self.num_decoders, 1)
+                                )
 
-    def forward(self, x, e, gap):
+    def forward(self, x, e, gap, num_sources, oracle):
         """
         args:
             x: list of num_layers, each being [B, N, K, S]
+            e: [B, N, L]
             gap: gap in segmentation to be removed
+            num_sources: ground truth sources [B]
+            oracle: if True, use num_sources, else use vad output
         returns:
-            signals: list of num_decoders, each [B, #stages, num_spks[i], T]
-            vad: [B, #stages, num_decoders]
+            signals: list of B, each [num_stages, num_spks[i], T]
+            vad: [B, num_stages, num_decoders]
         """
+        num_sources = num_sources.long()
         B, N, K, S = x[0].size()
         num_stages = self.num_layers if self.multiloss and self.training else 1
-        # [#stages*B, out_channels, K, S]
+        if not oracle: # if running test script
+            assert num_stages == 1
+
+        # [num_stages * B, out_channels, K, S]
         if self.multiloss and self.training:
-            x = torch.stack(x, dim=0).view(self.num_layers*B, N, K, S)
+            x = torch.stack(x, dim=0).view(self.num_layers * B, N, K, S)
         else:
             x = x[-1]
-        # [#stages*B, num_decoders]
-        vad = self.vad(x).squeeze() # only logits
-        # [#stages, B, num_decoders]
-        vad = vad.view(num_stages, B, -1)
-        # startt = time.time()
 
-        ''' old implementation
-            # list of num_decoders, each [#stages*B, spks, T]
-            x = [decoder(x, e, gap, num_stages) for decoder in self.decoderlist]
-            T = x[0].shape[-1]
-            # list of num_decoders, each [B, #stages, spks, T]
-            x = [signal.view(num_stages, B, -1, T).transpose(0, 1) for signal in x]
+        # [B, num_stages, num_decoders]
+        vad = self.vad(x).squeeze().view(num_stages, B, -1).transpose(0, 1) # only logits
+
+        # [B, num_stages, out_channels, K, S]
+        x = x.view(num_stages, B, N, K, S).transpose(0, 1)
+
+        # [B, each [num_stages, num_spks, T]]
+        signals_list = []
+        for i in range(B):
+            decoder_idx = num_sources[i] - 2 if oracle else vad[i][0].argmax(0)
+            decoder = self.decoders[decoder_idx]
+            signals_list.append(decoder(x[i], e[i], gap))
+            
+        # padding for multi-gpu
+        T = signals_list[0].size(-1)
+        signal_tensor = torch.zeros(B, num_stages, self.max_spks, T).to(x.get_device())
+        for i in range(B):
+            num_spks = num_sources[i] if oracle else vad[i][0].argmax(0) + 2
+            signal_tensor[i, :, :num_spks, :] = signals_list[i]
+
+        ''' grouped convolution
+            # [B, #stages, max_spks, num_decoders, T]
+            x = self.decode(x, e, gap, num_stages)
+            signals = []
+            for decoder_id in range(self.num_decoders):
+                valid_spks = self.num_spks[decoder_id]
+                # [B, #stages, num_spks[i], T]
+                decoder_signal = x[:, :, :valid_spks, decoder_id, :]
+                signals.append(decoder_signal)
+
+            # print('device %d used %.3f' % (torch.cuda.current_device(), time.time()-startt))
         '''
-        # [B, #stages, max_spks, num_decoders, T]
-        x = self.decode(x, e, gap, num_stages)
-        signals = []
-        for decoder_id in range(self.num_decoders):
-            valid_spks = self.num_spks[decoder_id]
-            # [B, #stages, num_spks[i], T]
-            decoder_signal = x[:, :, :valid_spks, decoder_id, :]
-            signals.append(decoder_signal)
+        return signal_tensor, vad
+    
+    # def decode(self, x, e, gap, num_stages):
+    #     '''
+    #         args:
+    #             x: [#stages*B, N, K, S]
+    #             e: [B, N, L]
+    #         outputs:
+    #             x: [B, #stages, max_spks, num_decoders, T]
+    #     '''
+    #     _, out_channels, K, S = x.size()
+    #     B, in_channels, L = e.size()
+    #     x = self.prelu(x)
+    #     # [#stages*B, max_spks*out_channels*num_decoders, K, S]
+    #     x = self.conv2d(x)
+    #     # [#stages*B*max_spks, N*num_decoders, K, S]
+    #     x = x.view(num_stages*B*self.max_spks, out_channels*self.num_decoders, K, S)
+    #     # [#stages*B*max_spks, N*num_decoders, L]
+    #     x = self._over_add(x, gap)
+    #     x = self.output(x)*self.output_gate(x)
+    #     # [#stages*B*max_spks, N*num_decoders, L]
+    #     x = self.end_conv1x1(x)
+    #     # [#stages, B, max_spks, N, num_decoders, L]
+    #     x = x.view(num_stages, B, self.max_spks, in_channels, self.num_decoders, L)
+    #     x = self.activation(x)
+    #     # [1, B, 1, N, 1, L]
+    #     e = e.unsqueeze(0).unsqueeze(2).unsqueeze(4)
+    #     x *= e
+    #     # [#stages*B*max_spks, N*num_decoders, L]
+    #     x = x.view(num_stages*B*self.max_spks, in_channels*self.num_decoders, L)
+    #     # [#stages*B*max_spks, num_decoders, T]
+    #     x = self.decoder(x)
+    #     # [#stages, B, max_spks, num_decoders, T]
+    #     x = x.view(num_stages, B, self.max_spks, self.num_decoders, -1)
 
-        # print('device %d used %.3f' % (torch.cuda.current_device(), time.time()-startt))
+    #     return x.transpose(0, 1)
 
-        return signals, vad.transpose(0, 1)
+    # def _over_add(self, input, gap):
+    #     '''
+    #        Merge sequence
+    #        input: [B, N, K, S]
+    #        gap: padding length
+    #        output: [B, N, L]
+    #     '''
+    #     B, N, K, S = input.shape
+    #     P = K // 2
+    #     # [B, N, S, K]
+    #     input = input.transpose(2, 3).contiguous().view(B, N, -1, K * 2)
 
-    def decode(self, x, e, gap, num_stages):
-        '''
-            args:
-                x: [#stages*B, N, K, S]
-                e: [B, N, L]
-            outputs:
-                x: [B, #stages, max_spks, num_decoders, T]
-        '''
-        _, out_channels, K, S = x.size()
-        B, in_channels, L = e.size()
-        x = self.prelu(x)
-        # [#stages*B, max_spks*out_channels*num_decoders, K, S]
-        x = self.conv2d(x)
-        # [#stages*B*max_spks, N*num_decoders, K, S]
-        x = x.view(num_stages*B*self.max_spks, out_channels*self.num_decoders, K, S)
-        # [#stages*B*max_spks, N*num_decoders, L]
-        x = self._over_add(x, gap)
-        x = self.output(x)*self.output_gate(x)
-        # [#stages*B*max_spks, N*num_decoders, L]
-        x = self.end_conv1x1(x)
-        # [#stages, B, max_spks, N, num_decoders, L]
-        x = x.view(num_stages, B, self.max_spks, in_channels, self.num_decoders, L)
-        x = self.activation(x)
-        # [1, B, 1, N, 1, L]
-        e = e.unsqueeze(0).unsqueeze(2).unsqueeze(4)
-        x *= e
-        # [#stages*B*max_spks, N*num_decoders, L]
-        x = x.view(num_stages*B*self.max_spks, in_channels*self.num_decoders, L)
-        # [#stages*B*max_spks, num_decoders, T]
-        x = self.decoder(x)
-        # [#stages, B, max_spks, num_decoders, T]
-        x = x.view(num_stages, B, self.max_spks, self.num_decoders, -1)
+    #     input1 = input[:, :, :, :K].contiguous().view(B, N, -1)[:, :, P:]
+    #     input2 = input[:, :, :, K:].contiguous().view(B, N, -1)[:, :, :-P]
+    #     input = input1 + input2
+    #     # [B, N, L]
+    #     if gap > 0:
+    #         input = input[:, :, :-gap]
 
-        return x.transpose(0, 1)
-
-    def _over_add(self, input, gap):
-        '''
-           Merge sequence
-           input: [B, N, K, S]
-           gap: padding length
-           output: [B, N, L]
-        '''
-        B, N, K, S = input.shape
-        P = K // 2
-        # [B, N, S, K]
-        input = input.transpose(2, 3).contiguous().view(B, N, -1, K * 2)
-
-        input1 = input[:, :, :, :K].contiguous().view(B, N, -1)[:, :, P:]
-        input2 = input[:, :, :, K:].contiguous().view(B, N, -1)[:, :, :-P]
-        input = input1 + input2
-        # [B, N, L]
-        if gap > 0:
-            input = input[:, :, :-gap]
-
-        return input
+    #     return input
 
 class Dual_RNN_model(nn.Module):
     '''
@@ -563,18 +583,20 @@ class Dual_RNN_model(nn.Module):
                  bidirectional=bidirectional, num_layers=num_layers, K=K, mulcat=mulcat)
         self.decoder = MultiDecoder(in_channels, out_channels, hidden_channels, kernel_size, num_layers, num_spks, multiloss)
     
-    def forward(self, x):
+    def forward(self, x, num_sources, oracle):
         '''
            x: [B, L]
+           num_sources: [B]
         '''
+        num_sources = num_sources.long()
+        assert x.shape[0] == num_sources.shape[0]
         # [B, N, L]
         e = self.encoder(x)
-        # list of #stages, [B, N, K, S]
+        # list of num_stages, [B, N, K, S]
         s, gap = self.separation(e)
-        # signals: list of num_spks - 1, each [B, #stages, spks, T]
-        # vad: [B, #stages, num_spks - 1]
-        signals, vad = self.decoder(s, e, gap)
-            
+        # signals: list of B, each [num_stages, num_spks[i], T]
+        # vad: [B, num_stages, num_decoders]
+        signals, vad = self.decoder(s, e, gap, num_sources, oracle)
         return signals, vad
 
     @staticmethod
@@ -595,10 +617,11 @@ class Dual_RNN_model(nn.Module):
 
 
 if __name__ == "__main__":
-    rnn = torch.nn.DataParallel(Dual_RNN_model(256, 64, 128, kernel_size=8, rnn_type='LSTM', norm='ln', dropout=0.0, bidirectional=True, num_layers=6, K=125, num_spks=5, multiloss=True, mulcat=(True, True))).cuda()
-    x = torch.ones(4, 32000).cuda()
-    audio, vad = rnn(x)
-    print(len(audio), audio[1].shape)
+    devices = [1, 2, 3]
+    rnn = torch.nn.DataParallel(Dual_RNN_model(256, 64, 128, kernel_size=8, rnn_type='LSTM', norm='ln', dropout=0.0, bidirectional=True, num_layers=6, K=125, num_spks=5, multiloss=True, mulcat=(True, True)), device_ids=devices).cuda(1)
+    x = torch.randn(6, 32000).cuda(1)
+    num_sources = torch.Tensor([2, 2, 3, 3, 4, 5])
+    audio, vad = rnn(x, num_sources, oracle=True)
     print(vad.shape)
     def check_parameters(net):
         '''
