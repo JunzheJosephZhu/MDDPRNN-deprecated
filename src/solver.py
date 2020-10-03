@@ -10,20 +10,21 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 class Solver(object):
-    def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq, half_lr,
-                early_stop, max_norm, lr, lr_override, momentum, l2, log_dir, lamb, decay_period, config, multidecoder):
+    def __init__(self, data, model, optimizer, epochs, save_folder, checkpoint, continue_from, model_path, print_freq, 
+                early_stop, max_norm, lr, lr_override, log_dir, lamb, decay_period, config, multidecoder, decay):
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
         self.optimizer = optimizer
+        self.lr_override = lr_override
 
         # Training config
         self.epochs = epochs
-        self.half_lr = half_lr
         self.early_stop = early_stop
         self.max_norm = max_norm
         self.lamb = lamb
         self.decay_period = decay_period
+        self.decay = decay
         self.multidecoder = multidecoder
         if multidecoder:
             from loss_multidecoder import cal_loss
@@ -45,13 +46,6 @@ class Solver(object):
         self._reset()
 
         self.writer = SummaryWriter(log_dir)
-        # learning rate override
-        if lr_override:
-            optim_state = self.optimizer.state_dict()
-            optim_state['param_groups'][0]['lr'] = lr
-            self.optimizer.load_state_dict(optim_state)
-            print('Learning rate adjusted to: {lr:.6f}'.format(
-                lr=optim_state['param_groups'][0]['lr']))
 
     def _reset(self):
         # Reset
@@ -64,7 +58,10 @@ class Solver(object):
             print('Loading checkpoint model %s' % self.continue_from)
             package = torch.load(self.continue_from)
             self.model.module.load_state_dict(package['state_dict'])
-            self.optimizer.load_state_dict(package['optim_dict'])
+            if not self.lr_override:
+                self.optimizer.load_state_dict(package['optim_dict'])
+            else:
+                print('lr override to %s' % str(self.optimizer.state_dict()))
             self.start_epoch = int(package.get('epoch', 1))
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
             self.cv_loss[:self.start_epoch] = package['cv_loss'][:self.start_epoch]
@@ -108,22 +105,20 @@ class Solver(object):
             self.writer.add_scalar('Accuracy/per_epoch_cv', val_acc, epoch)
 
             # Adjust learning rate (halving)
-            if self.half_lr:
-                if val_loss >= self.prev_val_loss:
-                    self.val_no_impv += 1
-                    if self.val_no_impv >= 10 and self.early_stop:
-                        print("No improvement for 10 epochs, early stopping.")
-                        break
-                else:
-                    self.val_no_impv = 0
+            if val_loss >= self.prev_val_loss:
+                self.val_no_impv += 1
+                if self.val_no_impv >= 10 and self.early_stop:
+                    print("No improvement for 10 epochs, early stopping.")
+                    break
+            else:
+                self.val_no_impv = 0
 
-            if epoch % self.decay_period == (self.decay_period-1):
+            if epoch % self.decay_period == (self.decay_period - 1):
                 optim_state = self.optimizer.state_dict()
-                optim_state['param_groups'][0]['lr'] = \
-                    optim_state['param_groups'][0]['lr'] * 0.98
+                for param_group in self.optimizer.state_dict()['param_groups']:
+                    param_group['lr'] = param_group['lr'] * self.decay
                 self.optimizer.load_state_dict(optim_state)
-                print('Learning rate adjusted to: {lr:.6f}'.format(
-                    lr=optim_state['param_groups'][0]['lr']))
+                print('Learning rate adjusted to: %s' % str(optim_state))
                     
             self.prev_val_loss = val_loss
 

@@ -14,7 +14,21 @@ new_path = 'pretrained/raymond_pretrained_newversion.pth'
 old_pkg = torch.load(os.path.join(root, old_path))
 old_lr = old_pkg['optim_dict']['param_groups'][0]['lr']
 model = Dual_RNN_model(enc, bottleneck, hidden, kernel_size=kernel_size, rnn_type=rnn_type, norm=norm, dropout=dropout, bidirectional=True, num_layers=num_layers, K=K, num_spks=num_spks, multiloss=multiloss, mulcat=(mul, cat))
-optimizer = torch.optim.Adam(model.parameters(), lr=old_lr, weight_decay=l2)
+
+encoder_params = {'params': model.encoder.parameters(), 'lr': old_lr}
+separation_params = {'params': model.separation.parameters(), 'lr': old_lr}
+decoder_params = {'params': model.decoder.decoders.parameters(), 'lr': old_lr * 4}
+vad_params = {'params': model.decoder.vad.parameters(), 'lr': old_lr}
+optimizer = torch.optim.Adam([encoder_params, separation_params, decoder_params, vad_params], lr=old_lr, weight_decay=l2)
+optim_state = optimizer.state_dict()
+for param_group in optimizer.state_dict()['param_groups']:
+    param_group['lr'] = param_group['lr'] * 0.94
+optimizer.load_state_dict(optim_state)
+print('Learning rate adjusted to: %s' % str(optim_state))
+
+print(len(list(model.parameters())), \
+    len(list(model.encoder.parameters())) + len(list(model.separation.parameters())) + \
+    len(list(model.decoder.decoders.parameters())) + len(list(model.decoder.vad.parameters())))
 
 old_dict = old_pkg['state_dict']
 new_dict = model.state_dict()
@@ -23,9 +37,10 @@ for key in new_dict.keys():
     check_mapping[key] = 1
 
 for name, param in old_dict.items():
+    # print(name)
     if name not in new_dict:
         name = name[len("decoder"):]
-        print(name, param.shape)
+        # print(name, param.shape)
         '''
         if not name.startswith(".prelu"):
             if name.startswith('.end'):
@@ -48,7 +63,7 @@ for name, param in old_dict.items():
                 assert chunks[i].shape == new_dict[mapped_name].shape
                 new_dict[mapped_name] = chunks[i]
         '''
-        print("I'm not sure how to fix this... or if it can be fixed at all.")
+        # print("I'm not sure how to fix this... or if it can be fixed at all.")
     else:
         new_dict[name] = param
         check_mapping[name] = 1
@@ -58,6 +73,7 @@ for value in check_mapping.values():
 
 # inversely check all names are mapped to
 for name, param in new_dict.items():
+    # print(name)
     if name not in old_dict:
         name = name.replace("decoder.decoders.", "")[1:]
         assert "decoder" + name in old_dict, "decoder" + name

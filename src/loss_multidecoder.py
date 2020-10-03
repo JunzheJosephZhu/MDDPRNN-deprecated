@@ -78,17 +78,19 @@ def cal_si_snr_with_pit(source, estimate_source, allow_extra_estimates=False):
 
 if __name__ == "__main__":
     torch.manual_seed(123)
-    num_stages = 6
-    C = 3
-    T = 32000
-    source_length = 20000
-    estimate_source = torch.randn(num_stages, C, T).cuda(1)
-    source = torch.randn(C, T).cuda(1)
-    source = estimate_source[0] + torch.randn(estimate_source[0].size()).cuda(1) / 2
-    estimate_source, source = estimate_source[..., :28000], source[..., :28000]
-    vad = torch.zeros([num_stages, 4]).cuda(1)
-    vad[[0, 1, 2, 3, 4, 5], [1, 0, 3, 2, 1, 2]] = 1
-    loss, snr, acc = cal_loss(source, estimate_source, source_length, vad, 0.5)
+    from tqdm import tqdm
+    for i in tqdm(range(100000)):
+        num_stages = 6
+        C = 3
+        T = 32000
+        source_length = 32000
+        estimate_source = torch.randn(num_stages, C, T).cuda(1)
+        source = torch.randn(C, T).cuda(1)
+        source = estimate_source[0] + torch.randn(estimate_source[0].size()).cuda(1) / 2
+        estimate_source, source = estimate_source[..., :32000], source[..., :32000]
+        vad = torch.zeros([num_stages, 4]).cuda(1)
+        vad[[0, 1, 2, 3, 4, 5], [1, 0, 3, 2, 1, 2]] = 1
+        loss, snr, acc = cal_loss(source, estimate_source, source_length, vad, 0.5)
     print('loss', loss)
     print('snr', snr)
     print('acc', acc)
