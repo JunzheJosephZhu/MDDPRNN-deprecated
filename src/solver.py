@@ -60,6 +60,7 @@ class Solver(object):
             self.model.module.load_state_dict(package['state_dict'])
             if not self.lr_override:
                 self.optimizer.load_state_dict(package['optim_dict'])
+                print('load lr at %s' % str(self.optimizer.state_dict()))
             else:
                 print('lr override to %s' % str(self.optimizer.state_dict()))
             self.start_epoch = int(package.get('epoch', 1))

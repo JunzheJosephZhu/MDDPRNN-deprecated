@@ -3,7 +3,7 @@ import sys
 import os
 config_name = os.path.basename(__file__).split('.')[0]
 root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model"
-lamb = 0.1
+lamb = 0.01
 maxlen = 4
 minlen = 2
 kernel_size = 8
@@ -14,7 +14,6 @@ num_layers = 6
 K = 125
 num_spks = 5
 epochs = 128
-half_lr = True # feature not enabled
 early_stop = True
 max_norm = 5
 shuffle = False
@@ -23,13 +22,12 @@ norm = 'ln'
 rnn_type = 'LSTM'
 dropout = 0.0
 lr = 4.8e-4
-momentum = 0.0
 save_folder = os.path.join(root, 'models')
 checkpoint = 1
 continue_from = os.path.join(save_folder, "config6.pth") # if not exist, randomly initialize
 model_path = config_name + "_best.pth" # best model save path
 print_freq = 10
-comment = ' changing lr schedule'
+comment = ' changing lr schedule, changed lamb to 0.01'
 log_dir = os.path.join(root, 'runs', time.strftime("%Y%m%d-%H%M%S") + config_name + comment)
 use_onoff = True # hungarian model if on, DPRNN if off. useless if multidecoder=True
 multiloss = True
