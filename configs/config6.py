@@ -21,14 +21,14 @@ batch_size = 4
 norm = 'ln'
 rnn_type = 'LSTM'
 dropout = 0.0
-lr = 4.8e-4
+lr = 3e-4
 save_folder = os.path.join(root, 'models')
 checkpoint = 1
 continue_from = os.path.join(save_folder, "config6.pth") # if not exist, randomly initialize
 model_path = config_name + "_best.pth" # best model save path
 print_freq = 10
-comment = ' changing lr schedule, changed lamb to 0.01'
-log_dir = os.path.join(root, 'runs', time.strftime("%Y%m%d-%H%M%S") + config_name + comment)
+comment = ' fixed bug concerning lr schedule'
+log_dir = os.path.join(root, 'runs', time.strftime("%Y%m%d-%H%M%Sd") + config_name + comment)
 use_onoff = True # hungarian model if on, DPRNN if off. useless if multidecoder=True
 multiloss = True
 mul = True

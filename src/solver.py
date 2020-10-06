@@ -60,9 +60,9 @@ class Solver(object):
             self.model.module.load_state_dict(package['state_dict'])
             if not self.lr_override:
                 self.optimizer.load_state_dict(package['optim_dict'])
-                print('load lr at %s' % str(self.optimizer.state_dict()))
+                print('load lr at %s' % str(self.optimizer.state_dict()['param_groups']))
             else:
-                print('lr override to %s' % str(self.optimizer.state_dict()))
+                print('lr override to %s' % str(self.optimizer.state_dict()['param_groups']))
             self.start_epoch = int(package.get('epoch', 1))
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
             self.cv_loss[:self.start_epoch] = package['cv_loss'][:self.start_epoch]
@@ -80,6 +80,15 @@ class Solver(object):
     def train(self):
         # Train model multi-epoches
         for epoch in range(self.start_epoch, self.epochs):
+            if epoch % self.decay_period == (self.decay_period - 1):
+                optim_state = self.optimizer.state_dict()
+                for param_group in optim_state['param_groups']:
+                    param_group['lr'] = param_group['lr'] * self.decay
+                self.optimizer.load_state_dict(optim_state)
+                print('Learning rate adjusted to: %s' % str(optim_state['param_groups']))
+
+            self.writer.add_scalar('LR/lr', self.optimizer.state_dict()["param_groups"][0]["lr"], epoch)
+
             # Train one epoch
             print("Training...")
             self.model.train()  # Turn on BatchNorm & Dropout
@@ -113,13 +122,6 @@ class Solver(object):
                     break
             else:
                 self.val_no_impv = 0
-
-            if epoch % self.decay_period == (self.decay_period - 1):
-                optim_state = self.optimizer.state_dict()
-                for param_group in self.optimizer.state_dict()['param_groups']:
-                    param_group['lr'] = param_group['lr'] * self.decay
-                self.optimizer.load_state_dict(optim_state)
-                print('Learning rate adjusted to: %s' % str(optim_state))
                     
             self.prev_val_loss = val_loss
 
@@ -245,5 +247,13 @@ class Solver(object):
                 self.writer.add_scalar('SNR/cv', snr.item(), epoch*len(data_loader)+i)
                 self.writer.add_scalar('Accuracy/cv', accuracy.item(), epoch*len(data_loader)+i)
 
+            if i <= 20:
+                self.writer.add_audio(f"Speech/{i}_original", padded_mixture[0], epoch, sample_rate=8000)
+                output_example = estimate_sources[0][-1]
+                for channel, example in enumerate(output_example):
+                    if cross_valid:
+                        self.writer.add_audio(f"Speech/{i}_reconstructed valid{channel}", example / (example.max() - example.min()), epoch, sample_rate=8000)
+                    else:
+                        self.writer.add_audio(f"Speech/{i}_reconstructed train{channel}", example / (example.max() - example.min()), epoch, sample_rate=8000)
 
         return total_loss / (i + 1), total_snr / (i + 1), total_accuracy / (i + 1)

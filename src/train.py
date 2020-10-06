@@ -9,8 +9,8 @@ root = "/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model"
 sys.path.append(root)
 import argparse
 parser = argparse.ArgumentParser(description='config file')
-parser.add_argument('--config', type=str, default='config6', help='config file')
-parser.add_argument('--lroverride', type=bool, default=False, help='override learning rate?')
+parser.add_argument('--config', type=str, help='config file')
+parser.add_argument('--lroverride', action='store_true', help='override learning rate?')
 
 args = parser.parse_args()
 import torch
