@@ -22,7 +22,7 @@ from data import TestDataset
 from loss_multidecoder import cal_loss, cal_si_snr_with_pit
 from duplicate_snr import duplicate_snr
 from tqdm import tqdm
-from config4 import kernel_size, enc, bottleneck, hidden, num_layers, K, num_spks, mul, cat, norm, rnn_type, dropout, maxlen, minlen
+from config6 import kernel_size, enc, bottleneck, hidden, num_layers, K, num_spks, mul, cat, norm, rnn_type, dropout, maxlen, minlen
 torch.manual_seed(0)
 torch.backends.cudnn.benchmark=False
 torch.backends.cudnn.deterministic=True
@@ -32,7 +32,7 @@ test_json = ["2spkr_json/tt",
             "4spkr_json/tt",
             "5spkr_json/tt"]
 
-model_path = "pretrained/raymond_pretrained_newversion.pth"
+model_path = "models/config6.pth"
 device = 3
 # chop settings
 sr = 8000
@@ -96,10 +96,9 @@ if __name__ == '__main__':
             estimate_source = estimate_source[0][0]
             sources = sources[:, :estimate_source.size(1)] # cut off extra samples
             if estimate_source.shape >= sources.shape:
-                snr = cal_si_snr_with_pit(sources, estimate_source.unsqueeze(0), True)[0].item()
+                snr = cal_si_snr_with_pit(sources, estimate_source.unsqueeze(0), True)[0].item() / sources.size(0)
             else:
                 snr = duplicate_snr(sources, estimate_source)
-            print(snr)
             total_snr[num_sources - 2] += snr
             confusion_matrix[estimate_source.shape[0] - 2, sources.shape[0] - 2] += 1
             pbar.set_description('total_snr %s, whole_acc %s, voted_acc %s, counts %s' % (str(total_snr / counts), 

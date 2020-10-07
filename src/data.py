@@ -23,7 +23,7 @@ def pad_audio(audio, len_samples=4*8000):
     return audio
 
 class MixtureDataset(data.Dataset):
-    def __init__(self, root, json_folders, sr=8000, seglen=4.0, minlen=2.0): # segment and cv_maxlen not implemented
+    def __init__(self, root, json_folders, sr=8000, seglen=4.0, minlen=2.0, debug=False): # segment and cv_maxlen not implemented
         """
         each line of textfile comes in the form of:
             filename1, dB1, filename2, dB2, ...
@@ -34,14 +34,15 @@ class MixtureDataset(data.Dataset):
                 seglen: length of each segment in seconds
                 minlen: minimum segment length
         """
+        str_tmp = '_debug' if debug else ''
         seglen = int(seglen * sr)
         minlen = int(minlen * sr)
         self.sr = sr
         self.mixes = []
         for json_folder in json_folders:
-            mixfiles, wavlens = list(zip(*load_json(os.path.join(root, json_folder, 'mix.json')))) # list of 20000 filenames, and 20000 lengths
+            mixfiles, wavlens = list(zip(*load_json(os.path.join(root + str_tmp, json_folder, 'mix.json')))) # list of 20000 filenames, and 20000 lengths
             mixfiles = [os.path.join(root, mixfile.split('dataset/')[1]) for mixfile in mixfiles]
-            sig_json = [load_json(file) for file in sorted(glob.glob(os.path.join(root, json_folder, 's*.json')))] # list C, each have 20000 filenames
+            sig_json = [load_json(file) for file in sorted(glob.glob(os.path.join(root + str_tmp, json_folder, 's*.json')))] # list C, each have 20000 filenames
             for i, spkr_json in enumerate(sig_json):
                 sig_json[i] = [os.path.join(root, line[0].split('dataset/')[1]) for line in spkr_json] # list C, each have 20000 filenames
             siglists = list(zip(*sig_json)) # list of 20000, each have C filenames

@@ -22,7 +22,9 @@ print('loading ' + args.config)
 
 torch.manual_seed(0)
 
+debug = True if args.config == "debug" else False
 root_dataset = os.path.join(root, "dataset")
+
 tr_json = ["2spkr_json/tr/",
             "3spkr_json/tr/",
             "4spkr_json/tr/",
@@ -46,8 +48,8 @@ else:
 
 if __name__ == '__main__':
     # data
-    tr_dataset = MixtureDataset(root_dataset, tr_json, seglen=c.maxlen, minlen=c.minlen)
-    cv_dataset = MixtureDataset(root_dataset, val_json, seglen=c.maxlen, minlen=c.minlen)
+    tr_dataset = MixtureDataset(root_dataset, tr_json, seglen=c.maxlen, minlen=c.minlen, debug=debug)
+    cv_dataset = MixtureDataset(root_dataset, val_json, seglen=c.maxlen, minlen=c.minlen, debug=debug)
     samples_weights = tr_dataset.example_weights
     sampler = WeightedRandomSampler(weights=samples_weights,
                                     num_samples=len(samples_weights),

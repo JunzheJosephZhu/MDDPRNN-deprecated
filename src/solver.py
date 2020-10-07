@@ -70,7 +70,7 @@ class Solver(object):
             if 'random_state' in package:
                 torch.set_rng_state(package['random_state'])
             
-            self.prev_val_loss = self.cv_loss[self.start_epoch-1]
+            self.prev_val_loss = self.cv_loss[self.start_epoch - 1]
             self.best_val_loss = min(self.cv_loss[:self.start_epoch])
 
         # Create save folder
@@ -111,8 +111,13 @@ class Solver(object):
                       epoch + 1, time.time() - start, val_loss))
             print('-' * 85)
             self.writer.add_scalar('Loss/per_epoch_cv', val_loss, epoch)
-            self.writer.add_scalar('SNR/per_epoch_cv', val_snr, epoch)
+            self.writer.add_scalar('SNR/per_epoch_cv', val_snr.mean(), epoch)
             self.writer.add_scalar('Accuracy/per_epoch_cv', val_acc, epoch)
+            self.writer.add_scalar('snr2/per_epoch_cv', val_snr[0], epoch)
+            self.writer.add_scalar('snr3/per_epoch_cv', val_snr[1], epoch)
+            self.writer.add_scalar('snr4/per_epoch_cv', val_snr[2], epoch)
+            self.writer.add_scalar('snr5/per_epoch_cv', val_snr[3], epoch)
+
 
             # Adjust learning rate (halving)
             if val_loss >= self.prev_val_loss:
@@ -155,12 +160,16 @@ class Solver(object):
     def _run_one_epoch(self, epoch, cross_valid=False):
         start = time.time()
         total_loss = 0
-        total_snr = 0
+        total_snr = np.zeros(4)
         total_accuracy = 0
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
         current_device = next(self.model.module.parameters()).device
+        counts = np.zeros(4)
 
         for i, (padded_mixture, mixture_lengths, padded_source) in enumerate(data_loader):
+            for tmp_ps in padded_source:
+                counts[tmp_ps.size(0) - 2] += 1
+                
             B = len(padded_source)
             padded_mixture = padded_mixture.cuda(current_device)
             padded_source = [tmp_ps.cuda(current_device) for tmp_ps in padded_source]
@@ -192,7 +201,7 @@ class Solver(object):
                 accuracy = torch.stack(accuracy)
             else: # if using multidecoder
                 # list of B, each [num_stages, spks, T]
-                estimate_sources = [estimate_source_list[i, :, :num_sources[i], :] for i in range(B)]
+                estimate_sources = [estimate_source_list[k, :, :num_sources[k], :] for k in range(B)]
                 loss = []
                 snr = []
                 accuracy = []
@@ -206,6 +215,7 @@ class Solver(object):
                     loss.append(step_loss)
                     snr.append(step_snr)
                     accuracy.append(acc)
+                    total_snr[num_sources[idx] - 2] += step_snr[-1].item()
                 loss = torch.stack(loss, dim=0).mean(dim=0)
                 snr = torch.stack(snr, dim=0).mean(dim=0)
                 accuracy = torch.stack(accuracy, dim=0).mean(dim=0)
@@ -228,32 +238,29 @@ class Solver(object):
                 print('backprop failed', padded_mixture.shape, e)
                 continue
             total_loss += loss.item()
-            total_snr += snr.item()
             total_accuracy += accuracy.item()
             if i % self.print_freq == 0:
-                print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-                      'Current Loss {3:.6f} | Average SNR {4: .3f} | Average accuracy {5:.3f} | {6:.1f} ms/batch'.format(
-                          epoch + 1, i + 1, total_loss / (i + 1),
-                          loss.item(), total_snr / (i + 1), total_accuracy / (i + 1), 
-                          1000 * (time.time() - start) / (i + 1)),
+                print(f'Epoch {epoch + 1} | Iter {i + 1} | Average Loss {total_loss / (i + 1): .2f} | '
+                      f'Current Loss {loss.item(): .2f} | Average SNR {str(total_snr / counts)} | '
+                      f'Average accuracy {total_accuracy / (i + 1):.2f} | {1000 * (time.time() - start) / (i + 1):.2f} ms/batch',
                       flush=True)
             
-            if not cross_valid:
-                self.writer.add_scalar('Loss/train', loss.item(), epoch*len(data_loader)+i)
-                self.writer.add_scalar('SNR/train', snr.item(), epoch*len(data_loader)+i)
-                self.writer.add_scalar('Accuracy/train', accuracy.item(), epoch*len(data_loader)+i)
-            else:
-                self.writer.add_scalar('Loss/cv', loss.item(), epoch*len(data_loader)+i)
-                self.writer.add_scalar('SNR/cv', snr.item(), epoch*len(data_loader)+i)
-                self.writer.add_scalar('Accuracy/cv', accuracy.item(), epoch*len(data_loader)+i)
+
+            mode = 'cv' if cross_valid else 'train'
+
+            self.writer.add_scalar(f'Loss/{mode}', loss.item(), epoch*len(data_loader)+i)
+            self.writer.add_scalar(f'SNR/{mode}', snr.item(), epoch*len(data_loader)+i)
+            self.writer.add_scalar(f'Accuracy/{mode}', accuracy.item(), epoch*len(data_loader)+i)
+            self.writer.add_scalar(f'snr2/{mode}', total_snr[0] / counts[0], epoch*len(data_loader)+i)
+            self.writer.add_scalar(f'snr3/{mode}', total_snr[1] / counts[1], epoch*len(data_loader)+i)
+            self.writer.add_scalar(f'snr4/{mode}', total_snr[2] / counts[2], epoch*len(data_loader)+i)
+            self.writer.add_scalar(f'snr5/{mode}', total_snr[3] / counts[3], epoch*len(data_loader)+i)
 
             if i <= 20:
-                self.writer.add_audio(f"Speech/{i}_original", padded_mixture[0], epoch, sample_rate=8000)
+                self.writer.add_audio(f"Speech/{i}_original {mode}", padded_mixture[0], epoch, sample_rate=8000)
                 output_example = estimate_sources[0][-1]
                 for channel, example in enumerate(output_example):
-                    if cross_valid:
-                        self.writer.add_audio(f"Speech/{i}_reconstructed valid{channel}", example / (example.max() - example.min()), epoch, sample_rate=8000)
-                    else:
-                        self.writer.add_audio(f"Speech/{i}_reconstructed train{channel}", example / (example.max() - example.min()), epoch, sample_rate=8000)
+                    self.writer.add_audio(f"Speech/{i}_reconstructed {mode} {channel}", example / (example.max() - example.min()), epoch, sample_rate=8000)
 
-        return total_loss / (i + 1), total_snr / (i + 1), total_accuracy / (i + 1)
+        self.writer.add_text(f'counts/{mode}', str(counts), global_step=epoch)
+        return total_loss / (i + 1), total_snr / counts, total_accuracy / (i + 1)

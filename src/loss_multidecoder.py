@@ -33,7 +33,7 @@ def cal_loss(source, estimate_source, source_length, vad, lamb):
     snrloss = 0 - max_snr
     vadloss = CCE(vad, vad_target)
     acc = (torch.argmax(vad, dim=1) == vad_target).float()
-    return snrloss + vadloss * lamb, snrloss, acc #, estimate_source, reorder_estimate_source
+    return snrloss / 3.5 + vadloss * lamb, snrloss / source.size(0), acc #, estimate_source, reorder_estimate_source
 
 
 def cal_si_snr_with_pit(source, estimate_source, allow_extra_estimates=False):
@@ -72,7 +72,7 @@ def cal_si_snr_with_pit(source, estimate_source, allow_extra_estimates=False):
 
     for stage_idx in range(num_stages):
         row_idx, col_idx = linear_sum_assignment(-pair_wise_si_snr[stage_idx].detach().cpu())
-        max_snr[stage_idx] = pair_wise_si_snr[stage_idx][row_idx, col_idx].mean()
+        max_snr[stage_idx] = pair_wise_si_snr[stage_idx][row_idx, col_idx].sum() # scale by number of speakers
 
     return max_snr
 
