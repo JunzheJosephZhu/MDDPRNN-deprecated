@@ -2,14 +2,20 @@ import librosa
 from scipy.io.wavfile import write
 import numpy as np
 EPS = 1e-8
-
+np.random.seed(0)
 # gaussian noise if true
 noise_gaussian = True
 
 # make signal and noise
 root = '/ws/ifp-10_3/hasegawa/junzhez2/Baseline_Model/'
 sound_file = root + "dataset/2speakers/wav8k/min/cv/s1/40oo0312_0.92357_02bc0218_-0.92357.wav"
+sound_file = root + "dataset/2speakers/wav8k/min/cv/s1/01ac021a_1.7691_01bo030b_-1.7691.wav"
+# sound_file = root + "dataset/2speakers/wav8k/min/cv/s1/01ao030j_1.8168_206o010d_-1.8168.wav"
+
 noise_file = root + "dataset/2speakers/wav8k/min/cv/s1/01va010d_0.11813_029a010y_-0.11813.wav"
+noise_file = root + "dataset/2speakers/wav8k/min/cv/s1/01ac021a_1.7691_01bo030b_-1.7691.wav"
+noise_file = root + "dataset/2speakers/wav8k/min/cv/s1/01ao030j_1.8168_206o010d_-1.8168.wav"
+
 sound, _ = librosa.load(sound_file, sr=None)
 noise, _ = librosa.load(noise_file, sr=None)
 len_noise = 6000
@@ -33,3 +39,5 @@ e_noise = s_hat - s_target
 si_snr = 10 * np.log10(np.sum(s_target ** 2) / (np.sum(e_noise ** 2) + EPS) + EPS)
 print(si_snr)
 
+snr = 10 * np.log10(np.sum(s_hat ** 2) / np.sum((s - s_hat)** 2))
+print(snr)

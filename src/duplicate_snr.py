@@ -30,6 +30,37 @@ def duplicate_snr(sources, variable_est):
         max_snrs.append(pair_wise_si_snr[:, source_idx].max().item())
     return np.mean(max_snrs)
 
+def cat_sources(estimate_sources, newchunk, overlap=16000):
+    '''
+        sources: [spks, T]
+        variable_est: [spks, T]
+    '''
+    sources, variable_est = estimate_sources[:, -overlap:], newchunk[:, :overlap]
+
+    EPS = 1e-8
+    assert sources.shape[0] == variable_est.shape[0]
+    zero_mean_target = sources - torch.mean(sources, dim=1, keepdim=True)
+    zero_mean_estimate = variable_est - torch.mean(variable_est, dim=1, keepdim=True)
+    s_target = torch.unsqueeze(zero_mean_target, dim=0)  # [1, C, T]
+    s_estimate = torch.unsqueeze(zero_mean_estimate, dim=1)  # [C_est, 1, T]
+    # s_target = <s', s>s / ||s||^2
+    pair_wise_dot = torch.mean(s_estimate * s_target, dim=2, keepdim=True)  # [C_est, C, 1]
+    s_target_energy = torch.mean(s_target ** 2, dim=2, keepdim=True) + EPS  # [1, C, 1]
+    pair_wise_proj = pair_wise_dot * s_target / s_target_energy  # [C_est, C, T], put the target energy term somewhere else
+    # e_noise = s' - s_target
+    e_noise = s_estimate - pair_wise_proj  # [C_est, C, T]
+    # SI-SNR = 10 * log_10(||s_target||^2 / ||e_noise||^2)
+    pair_wise_si_snr = torch.mean(pair_wise_proj ** 2, dim=2) / (torch.mean(e_noise ** 2, dim=2) + EPS)
+    pair_wise_si_snr = 10 * torch.log10(pair_wise_si_snr + EPS)  # [C_est, C]
+
+    row_idx, col_idx = linear_sum_assignment(-pair_wise_si_snr.detach().cpu())
+    order = np.argsort(col_idx)
+    row_idx, col_idx = row_idx[order], col_idx[order]
+    estimate_sources[:, -overlap:] = (estimate_sources[:, -overlap:] + newchunk[:, :overlap]) / 2
+    estimate_sources = torch.cat([estimate_sources, newchunk[:, overlap:]], dim=1)
+    return estimate_sources
+
+
 if __name__ == "__main__":
     torch.manual_seed(123)
     testcase = 0

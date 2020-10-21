@@ -36,14 +36,14 @@ def cal_loss(source, estimate_source, source_length, vad, lamb):
     return snrloss / 3.5 + vadloss * lamb, snrloss / source.size(0), acc #, estimate_source, reorder_estimate_source
 
 
-def cal_si_snr_with_pit(source, estimate_source, allow_extra_estimates=False):
+def cal_si_snr_with_pit(source, estimate_source, allow_unequal_estimates=False):
     """Calculate SI-SNR with PIT training.
     Args:
         source: [C, T]
         estimate_source: [num_stages, C, T]
     """
-    if allow_extra_estimates:
-        assert source.size(0) <= estimate_source.size(1) and source.size(1) == estimate_source.size(2)
+    if allow_unequal_estimates:
+        assert source.size(1) == estimate_source.size(2)
     else:
         assert source.size() == estimate_source.size()[1:]
     num_stages, C, num_samples = estimate_source.size()
