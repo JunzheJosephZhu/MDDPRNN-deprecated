@@ -42,6 +42,7 @@ seglen = int(maxlen * sr)
 minlen = int(minlen * sr)
 
 use_oracle = False
+compute_signal = False
 # pref = {2:-30, 3:-30, 4:-30, 5:-30}
 pref = {2:-19.10105119, 3:-14.07390921, 4:-9.34538167,  5:-5.91764883}
 
@@ -103,11 +104,12 @@ if __name__ == '__main__':
                     votes[vad_chunk[-1].argmax(0)] += 1
                 vad_voted = np.argmax(votes, axis=0)
             else:
-                _, vad_list = model(chunks, torch.Tensor([num_sources] * len(chunks)), oracle=use_oracle)
+                estimate_chunks, vad_list = model(chunks, torch.Tensor([num_sources] * len(chunks)), oracle=use_oracle)
                 for vad_chunk in vad_list:
                     votes[vad_chunk[-1].argmax(0)] += 1
                 vad_voted = np.argmax(votes, axis=0)
-                estimate_chunks, _ = model(chunks, torch.Tensor([vad_voted + 2] * len(chunks)), oracle=True)
+                if compute_signal:
+                    estimate_chunks, _ = model(chunks, torch.Tensor([vad_voted + 2] * len(chunks)), oracle=True)
 
             voted_accuracy[num_sources - 2] += vad_voted == num_sources - 2
 
@@ -124,6 +126,15 @@ if __name__ == '__main__':
                 estimate_sources = cat_sources(estimate_sources, estimate_chunk, overlap=minlen)
             assert estimate_sources.size(1) == sources.size(1)
 
+            # if estimate_sources.size() == sources.size():
+            #     saved_sources = estimate_sources.cpu().numpy()
+            #     saved_mixture = mixture[0].cpu().numpy()
+            #     write(f"examples/{saved_sources.shape[0]}_mixture.wav", 8000, saved_mixture / saved_mixture.std())
+            #     for i, saved_source in enumerate(saved_sources):
+            #         write(f"examples/{saved_sources.shape[0]}_source_{i}.wav", 8000, saved_source / saved_source.std())
+
+
+
             # estimate_sources: [spks, T] sources: [spks, T]
             snr = cal_si_snr_with_pit(sources, estimate_sources.unsqueeze(0), allow_unequal_estimates=True)[0].item()
             snr += pref[num_sources] * np.abs(estimate_sources.size(0) - sources.size(0))
@@ -132,4 +143,4 @@ if __name__ == '__main__':
             confusion_matrix[estimate_sources.shape[0] - 2, sources.shape[0] - 2] += 1
             pbar.set_description('total_snr %s, voted_acc %s, counts %s' % (str(total_snr / counts), 
                                 str(voted_accuracy / counts), str(counts)))
-        print(confusion_matrix, confusion_matrix / np.sum(confusion_matrix))
+        print(confusion_matrix, '\n', confusion_matrix / np.sum(confusion_matrix))

@@ -11,6 +11,5 @@
         "**/egs/**": true,
         "dataset/**": true,
         "**/*.wav": true
-    },
-    "python.pythonPath": "/ws/ifp-10_3/hasegawa/junzhez2/anaconda3/bin/python"
+    }
 }

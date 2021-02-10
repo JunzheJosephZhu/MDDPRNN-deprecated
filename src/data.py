@@ -47,7 +47,7 @@ class MixtureDataset(data.Dataset):
                 sig_json[i] = [os.path.join(root, line[0].split('dataset/')[1]) for line in spkr_json] # list C, each have 20000 filenames
             siglists = list(zip(*sig_json)) # list of 20000, each have C filenames
             self.mixes += list(zip(mixfiles, siglists, wavlens))
-        #printlist(self.mixes)
+
         self.examples = []
         for i, mix in enumerate(self.mixes):
             if mix[2] < minlen:

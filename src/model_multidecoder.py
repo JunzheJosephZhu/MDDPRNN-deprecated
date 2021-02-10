@@ -450,7 +450,7 @@ class MultiDecoder(nn.Module):
             num_sources: ground truth sources [B]
             oracle: if True, use num_sources, else use vad output
         returns:
-            signals: list of B, each [num_stages, num_spks[i], T]
+            signal_tensor: [B, num_stages, max_spks, T], where only the first num_spks channels are nonzero for each example in the third dimension
             vad: [B, num_stages, num_decoders]
         """
         num_sources = num_sources.long()
