@@ -16,15 +16,13 @@
   doi={10.1109/ICASSP39728.2021.9414205}}
 ```
 
-### This is the repository for multi-decoder DPRNN, submitted to ICASSP 2021. It deals with source separation with variable number of speakers. It has 98.5% accuracy in speaker number of selection and similar SNR as models trained individually on fixed number of speakers, which is much higher than all previous SOTA methods.
+### This is the repository for multi-decoder DPRNN, published at ICASSP 2021. It deals with source separation with variable number of speakers. It has 98.5% accuracy in speaker number classification, which is much higher than all previous SOTA methods. It also has similar SNR as models trained separately on different number of speakers, but its runtime is constant and independent of the number of speakers. 
 
-### ~We are still refactoring the codebase, and will provide another useful update soon.~
-We decided to refactor the codebase and integrate it into Asteroid.
-New version of the code can be found at: https://github.com/asteroid-team/asteroid/tree/master/egs/wsj0-mix-var/Multi-Decoder-DPRNN
+## The code in this codebase is deprecated. New version of the code can be found at: https://github.com/asteroid-team/asteroid/tree/master/egs/wsj0-mix-var/Multi-Decoder-DPRNN
 Pretrained mini model and config can be found at: https://huggingface.co/JunzheJosephZhu/MultiDecoderDPRNN
 Project page & example output can be found at: https://junzhejosephzhu.github.io/Multi-Decoder-DPRNN/
 
-Results
+Results(Confusion Matrix)
 2    | 3    | 4    |5
 -----|------|------|--
 2998 | 17   | 1    |0
