@@ -1,7 +1,7 @@
-### TODO:
-- [x] integrate the repo into astroid
+## This is the repository for multi-decoder DPRNN, published at ICASSP 2021. 
+Summary: Multi-Decoder DPRNN deals with source separation with variable number of speakers. It has 98.5% accuracy in speaker number classification, which is much higher than all previous SOTA methods. It also has similar SNR as models trained separately on different number of speakers, but its runtime is constant and independent of the number of speakers. 
 
-## paper link: https://arxiv.org/abs/2011.12022
+paper link: https://arxiv.org/abs/2011.12022
 
 ## Kindly cite this paper
 ```
@@ -16,7 +16,7 @@
   doi={10.1109/ICASSP39728.2021.9414205}}
 ```
 
-### This is the repository for multi-decoder DPRNN, published at ICASSP 2021. It deals with source separation with variable number of speakers. It has 98.5% accuracy in speaker number classification, which is much higher than all previous SOTA methods. It also has similar SNR as models trained separately on different number of speakers, but its runtime is constant and independent of the number of speakers. 
+
 
 ## The code in this codebase is deprecated. New version of the code can be found at: https://github.com/asteroid-team/asteroid/tree/master/egs/wsj0-mix-var/Multi-Decoder-DPRNN
 Pretrained mini model and config can be found at: https://huggingface.co/JunzheJosephZhu/MultiDecoderDPRNN
