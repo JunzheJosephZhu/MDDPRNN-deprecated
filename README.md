@@ -24,6 +24,7 @@ paper link: https://arxiv.org/abs/2011.12022
 ## The code in this codebase is deprecated. New version of the code can be found at: https://github.com/asteroid-team/asteroid/tree/master/egs/wsj0-mix-var/Multi-Decoder-DPRNN
 Pretrained mini model and config can be found at: https://huggingface.co/JunzheJosephZhu/MultiDecoderDPRNN \
 Project page & example output can be found at: https://junzhejosephzhu.github.io/Multi-Decoder-DPRNN/
+Presentation slides can be found here: https://sigport.org/sites/default/files/docs/Multi-Decoder%20DPRNN%20presentation.pdf
 
 Results(Confusion Matrix)
 2    | 3    | 4    |5
