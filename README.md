@@ -1,6 +1,9 @@
 ## This is the repository for Multi-Decoder DPRNN, published at ICASSP 2021. 
 Summary: Multi-Decoder DPRNN deals with source separation with variable number of speakers. It has 98.5% accuracy in speaker number classification, which is much higher than all previous SOTA methods. It also has similar SNR as models trained separately on different number of speakers, but its runtime is constant and independent of the number of speakers. 
 
+TODO:
+[ ] add instructions to prepare dataset and example commands
+
 paper link: https://arxiv.org/abs/2011.12022
 
 ## Kindly cite this paper
