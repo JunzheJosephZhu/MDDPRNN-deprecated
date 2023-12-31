@@ -19,5 +19,8 @@
 0    | 6    | 2928 |80
 0    | 0    | 44   |2920
 
+## Eval
+Model checkpoints and tensorboard logs can be downloaded [here](https://1drv.ms/f/s!AngOiCKyXEDIi-I2oAquUbuzbg9MFg?e=8lvoom)
+
 ## Contact the author
 If you have any question, you can reach me at josefzhu@stanford.edu

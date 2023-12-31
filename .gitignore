@@ -2,6 +2,9 @@ egs/*/data
 egs/*/exp
 egs/*
 
+runs/
+models/
+
 dataset/*speakers
 
 tools/sph2pipe_v2.5
